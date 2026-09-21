@@ -18,7 +18,7 @@ symbol names like:
 ```elisp
 (require 'ert-gwt)
 
-(gwt-deftest
+(ert-gwt-deftest
   (:given ((user (make-user "alice" "secret")))
    (activate-user user))
   (:when  (login user))
