@@ -65,7 +65,7 @@ Put `ert-gwt.el` on your `load-path`:
 ### Basic
 
 ```elisp
-(gwt-deftest
+(ert-gwt-deftest
   (:given ((user (make-user "alice" "secret"))))
   (:when  (login user))
   (:then  (login-redirects-to-home-p user)))
@@ -84,7 +84,7 @@ Expands to:
 ### With `:describe`
 
 ```elisp
-(gwt-deftest
+(ert-gwt-deftest
   (:describe "login redirects to home")
   (:given ((user (make-user "alice" "secret"))))
   (:when  (login user))
@@ -97,7 +97,7 @@ readable in ERT reports.
 ### Multiple `:then` clauses
 
 ```elisp
-(gwt-deftest
+(ert-gwt-deftest
   (:given ((agent (make-mail-agent))
            (mail  (make-mail :id 42))))
   (:when  (agent-delete agent mail))
@@ -110,7 +110,7 @@ Each `:then` expression is wrapped in `should` automatically.
 ### Setup inside `:given`
 
 ```elisp
-(gwt-deftest
+(ert-gwt-deftest
   (:given ((user (make-user "alice" "secret")))
    (activate-user user)
    (setf (user-login-attempts user) 3))
