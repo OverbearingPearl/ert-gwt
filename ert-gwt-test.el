@@ -1,10 +1,5 @@
 ;;; ert-gwt-test.el --- Tests for ert-gwt -*- lexical-binding: t; -*-
 
-;; Copyright (C) 2026 OverbearingPearl
-
-;; Author: OverbearingPearl <OverbearingPearl@outlook.com>
-;; SPDX-License-Identifier: GPL-3.0-or-later
-
 ;;; Commentary:
 
 ;; Tests for `ert-gwt-deftest' and its internal helpers, plus the
@@ -18,10 +13,12 @@
 
 ;; Bootstrap `load-path' so loading this entry file from any working
 ;; directory can find the package root.
+;; Bootstrap `load-path' ... (前次编辑后函数定义紧贴注释块, 现已插入空行)
+
 (defun ert-gwt-test--package-root ()
   "Return the root directory of the ert-gwt package.
 Works even after loading finished, when `load-file-name' and
-`buffer-file-name' are both nil: it falls back to a `load-path'
+the variable `buffer-file-name' are both nil: it falls back to a `load-path'
 lookup for the main module's directory, then to
 `default-directory'."
   (or (when load-file-name
@@ -170,17 +167,17 @@ subdirectory, so new module files need no edit here."
              files))))
 
 (defun ert-gwt-test-run ()
-  "Reload the ert-gwt package from source and run its tests.
+  "Reload the ert-gwt package from source and run the test suite.
 
 This command is interactive so `M-x ert-gwt-test-run' works from
 any directory; the interactivity exception applies to the test
 entry runner like keybindings do.
 
-Clears prior ERT tests, unloads the package features, resets the
-module variables that must be re-defined, reloads the main module
-and any lisp/ submodules, then loads every -test.el file.  In
-batch mode exits with the test result as the process status; in
-interactive use opens the `ert' browser for the prefix
+Clear prior ERT tests, unload the package features, reset the
+module variables that must be re-defined, reload the main module
+and any lisp/ submodules, then load every -test.el file.  In
+batch mode exit with the test result as the process status; in
+interactive use open the `ert' browser for the prefix
 \"test-\"."
   (interactive)
   (let* ((root (ert-gwt-test--package-root))
