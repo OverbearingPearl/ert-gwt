@@ -58,7 +58,7 @@
 Buffers created afterwards are killed by the test's `unwind-protect',
 so a test never leaves extra buffers behind.")
 
-(when (boundp 'load-file-name)
+(when (and (boundp 'load-file-name) load-file-name)
   (let ((dir (file-name-directory load-file-name)))
     (add-to-list 'load-path dir)
     (let ((lisp-dir (expand-file-name "lisp" dir)))
