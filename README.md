@@ -120,6 +120,23 @@ Each `:then` expression is wrapped in `should` automatically.
 
 `:given` supports both `let`-style bindings and setup forms.
 
+### Clause reference
+
+| Clause | Required? | How many |
+|---|---|---|
+| `:describe` | optional | at most one |
+| `:given` | optional | zero or more, nested in order |
+| `:when` | required | exactly one |
+| `:then` | required | one or more |
+| `:teardown` | optional | zero or more, run in order |
+
+Automatic cleanup always runs unconditionally, even when the test
+fails: buffers created during the test are killed under
+`unwind-protect`, and temporary files created and tracked via
+`ert-gwt--temp-file` are deleted. You may call `ert-gwt--temp-file`
+inside `:given` to create temporary files that are removed
+automatically afterwards.
+
 ## Design principles
 
 1. **Structure belongs in structure, not in names.**

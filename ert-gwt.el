@@ -30,6 +30,17 @@
 ;; forms.  `:when' holds the action under test.  Each `:then' form is
 ;; wrapped in `should', so plain ERT expectations apply.
 ;;
+;; Clause occurrence rules: `:describe' is optional (at most
+;; once), `:given' is optional and may repeat (each occurrence is
+;; nested, so later givens see earlier bindings), `:when' is
+;; required and allowed exactly once, `:then' is required and may
+;; repeat, and `:teardown' is optional and may repeat.
+;;
+;; Cleanup is automatic: user `:teardown' forms run first, then
+;; buffers created during the test are killed and temp files made
+;; with `ert-gwt--temp-file' are deleted, all inside
+;; `unwind-protect' even when the test fails.
+;;
 ;; There are no dependencies beyond ERT itself.  One macro, one
 ;; counter, one `provide'.
 
@@ -40,6 +51,12 @@
 
 (defvar ert-gwt--counter 0
   "Counter used to generate unique names for anonymous tests.")
+
+(defvar ert-gwt--base-buffers nil
+  "Buffers present when a GWT test body started.
+
+Buffers created afterwards are killed by the test's `unwind-protect',
+so a test never leaves extra buffers behind.")
 
 (when (boundp 'load-file-name)
   (let ((dir (file-name-directory load-file-name)))
@@ -59,9 +76,12 @@
   "Parse GWT CLAUSES into a property list of parsed parts.
 
 Recognized clauses are `:describe' (a string), `:given' (a list of
-`let'-style bindings followed by optional setup forms), `:when' (a
-single form) and `:then' (one or more forms)."
-  (let (describe bindings setup when when-p thens)
+`let'-style bindings followed by optional setup forms; repeatable,
+with each occurrence recorded as a segment (BINDINGS . SETUP-FORMS)
+in order), `:when' (a single form, allowed at most once), `:then'
+\\(one or more forms) and `:teardown' (one or more forms; repeatable,
+with forms collected in order)."
+  (let (describe givens when when-p thens teardowns)
     (dolist (clause clauses)
       (pcase clause
         (`(:describe ,(and s (pred stringp)))
@@ -69,10 +89,8 @@ single form) and `:then' (one or more forms)."
         (`(:given . ,rest)
          (let ((first (car rest)))
            (if (and (consp first) (listp (car first)))
-               (setq bindings first
-                     setup (cdr rest))
-             (setq bindings nil
-                   setup rest))))
+               (setq givens (append givens (list (cons first (cdr rest))) nil))
+             (setq givens (append givens (list (cons nil rest)) nil)))))
         (`(:when ,form)
          (when when-p
            (error "ert-gwt-deftest: Only one :when clause allowed"))
@@ -80,6 +98,8 @@ single form) and `:then' (one or more forms)."
                when-p t))
         (`(:then ,form)
          (push form thens))
+        (`(:teardown . ,rest)
+         (setq teardowns (append teardowns rest nil)))
         (_
          (error "ert-gwt-deftest: Unrecognized clause %S" clause))))
     (unless when-p
@@ -87,10 +107,49 @@ single form) and `:then' (one or more forms)."
     (unless thens
       (error "ert-gwt-deftest: Missing :then clause"))
     (list :describe describe
-          :bindings bindings
-          :setup setup
+          :givens givens
           :when when
-          :thens (nreverse thens))))
+          :thens (nreverse thens)
+          :teardowns teardowns)))
+
+(defun ert-gwt--expand-givens (GIVENS WHEN-FORM THENS)
+  "Build nested `let' forms binding GIVEN segments around WHEN-FORM and THENS.
+GIVENS is a list of GIVEN segments, each a list whose car is a
+`let' binding list and whose cdr is the segment body.  WHEN-FORM
+is the WHEN clause form to evaluate.  THENS is a list of THEN
+forms, each wrapped in `should'."
+  (if GIVENS
+      (let ((segment (car GIVENS)))
+        `(let ,(car segment)
+           ,@(cdr segment)
+           ,(ert-gwt--expand-givens (cdr GIVENS) WHEN-FORM THENS)))
+    `(progn ,WHEN-FORM
+            ,@(mapcar (lambda (then) `(should ,then)) THENS))))
+
+(defvar ert-gwt--tracked-files nil "Temporary files created via `ert-gwt--temp-file', deleted after each test.")
+
+(defvar ert-gwt--initial-buffers nil
+  "Snapshot of `buffer-list' taken at `ert-gwt--deftest' body start.
+Used by `ert-gwt--cleanup' to detect buffers created during the test.")
+
+(defun ert-gwt--temp-file (&optional prefix)
+  "Create a temp file named with PREFIX (or \"ert-gwt-\" by default).
+The file is deleted automatically after the test."
+  (let ((file (make-temp-file (or prefix "ert-gwt-"))))
+    (push file ert-gwt--tracked-files)
+    file))
+
+(defun ert-gwt--cleanup (pre-buffers)
+  "Kill buffers created during the test (not listed in PRE-BUFFERS)
+and delete tracked temp files."
+  (dolist (buf (buffer-list))
+    (unless (memq buf pre-buffers)
+      (when (buffer-live-p buf)
+        (kill-buffer buf))))
+  (dolist (file ert-gwt--tracked-files)
+    (when (file-exists-p file)
+      (delete-file file)))
+  (setq ert-gwt--tracked-files nil))
 
 (defun ert-gwt--name (parsed)
   "Return the ERT test name for a PARSED clause list."
@@ -106,27 +165,46 @@ single form) and `:then' (one or more forms)."
 Each element of CLAUSES is one of:
 
   (:describe STRING)         optional; derives the test name
-  (:given BINDINGS FORM...)  let-style bindings plus setup forms
+  (:given BINDINGS FORM...)  let-style bindings plus setup forms;
+                             may appear multiple times, each nested
+                             so later givens see earlier bindings
   (:when FORM)               the action under test (exactly one)
   (:then FORM)               an expectation (one or more)
+  (:teardown FORM...)        cleanup forms, evaluated in order in
+                             the `unwind-protect' cleanup body after
+                             the test body (before
+                             `ert-gwt--cleanup'), so they run even
+                             when the test fails
 
-The macro expands to an `ert-deftest' whose body binds BINDINGS,
-runs the setup forms and the `:when' form, and wraps every `:then'
-form in `should'."
-  (declare (indent 0))
+The macro expands to an `ert-deftest' whose body evaluates the
+`:given' clauses in order, runs the `:when' form, and wraps every
+`:then' form in `should'.  The test body and the user-supplied
+`:teardown' forms run under `unwind-protect', so teardown happens
+unconditionally even on failure.  After the teardown forms,
+`ert-gwt--cleanup' performs automatic cleanup: buffers created
+during the test are killed, and temp files created via
+`ert-gwt--temp-file' are deleted (files created by any other
+means are not tracked and are not removed).  Buffers that existed
+before the test are never touched, because the snapshot in
+`ert-gwt--pre-buffers' is captured via `buffer-list' at the very
+start of the test body, before any clause runs; consequently
+buffers created before the macro expansion's body executes (i.e.,
+outside this macro) are outside the snapshot's diff and are
+preserved."  (declare (indent 0))
   (let* ((parsed (ert-gwt--parse-clauses clauses))
          (name (ert-gwt--name parsed))
          (doc (or (plist-get parsed :describe) "anonymous GWT test"))
-         (bindings (plist-get parsed :bindings))
-         (setup (plist-get parsed :setup))
+         (givens (plist-get parsed :givens))
          (when-form (plist-get parsed :when))
-         (thens (plist-get parsed :thens)))
+         (thens (plist-get parsed :thens))
+         (teardowns (plist-get parsed :teardowns)))
     `(ert-deftest ,name ()
        ,doc
-       (let ,bindings
-         ,@setup
-         ,when-form
-         ,@(mapcar (lambda (then) `(should ,then)) thens)))))
+       (let ((ert-gwt--pre-buffers (buffer-list)))
+         (unwind-protect
+             ,(ert-gwt--expand-givens givens when-form thens)
+           ,@teardowns
+           (ert-gwt--cleanup ert-gwt--pre-buffers))))))
 
 (provide 'ert-gwt)
 

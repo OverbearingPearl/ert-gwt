@@ -66,12 +66,23 @@ lookup for the main module's directory, then to
                    (:when (ignore x))
                    (:then (not (null x)))
                    (:then t)))))
-    (ert-info ("A full clause set parses into describe, bindings,\n setup and thens")
+    (ert-info ("A full clause set parses into describe and a list of givens\n plus thens")
       (should (equal (plist-get parsed :describe) "a test"))
-      (should (equal (plist-get parsed :bindings) '((x 1))))
-      (should (equal (plist-get parsed :setup)
-                     '((setq x (1+ x)))))
+      (should (equal (plist-get parsed :givens)
+                     '((((x 1)) (setq x (1+ x))))))
       (should (= (length (plist-get parsed :thens)) 2)))))
+
+(ert-deftest ert-gwt-test--parse-then-multiple-clauses ()
+  "Repeated :then clauses concatenate expectations; unknown keys raise error."
+  (let ((parsed (ert-gwt--parse-clauses
+                 '((:given ((x 1)))
+                   (:when t)
+                   (:then (should (= x 1)))
+                   (:then (should (> x 0)))
+                   (:then t)))))
+    (ert-info ("Three :then clauses concatenate in order")
+      (should (equal (plist-get parsed :thens)
+                     '((should (= x 1)) (should (> x 0)) t))))))
 
 (ert-deftest ert-gwt-test--parse-rejects-missing-when ()
   (ert-info ("Parsing clauses without :when must signal an error")
