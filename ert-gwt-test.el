@@ -112,6 +112,118 @@ lookup for the main module's directory, then to
       (should (eq (ert-gwt--name parsed)
                   'test-login-redirects)))))
 
+(ert-deftest ert-gwt-test--name-anonymous-counter ()
+  (let ((ert-gwt--counter 0))
+    (with-temp-buffer
+      (ert-info ("Anonymous :name yields test-gwt-N, expected test-gwt-1 then test-gwt-2")
+        (let* ((first (ert-gwt--name
+                       (ert-gwt--parse-clauses '((:when t) (:then t)))))
+               (second (ert-gwt--name
+                        (ert-gwt--parse-clauses '((:when t) (:then t))))))
+          (should (eq first 'test-gwt-1))
+          (should (eq second 'test-gwt-2)))))))
+
+(ert-deftest ert-gwt-test--parse-teardown-and-bare-given ()
+  (ert-info ("Parse collects :teardowns as ((foo) (bar) (baz)) in order")
+    (let ((plist (ert-gwt--parse-clauses
+                  '((:given (x) (setq x 1))
+                    (:teardown (foo))
+                    (:teardown (bar) (baz))
+                    (:when t)
+                    (:then t)))))
+      (should (equal (plist-get plist :teardowns)
+                     '((foo) (bar) (baz))))))
+  (ert-info ("Bare :given (non-binding rest) recorded as ((nil (message \"hi\")))")
+    (let ((plist (ert-gwt--parse-clauses
+                  '((:given (message "hi")) (:when t) (:then t)))))
+      (should (equal (plist-get plist :givens)
+                     '((nil (message "hi"))))))))
+
+;; The anonymous test defun left behind by this test is cleared on the
+;; next full run: ert-gwt-test-run calls ert-delete-all-tests first.
+(ert-deftest ert-gwt-test--deftest-teardown-runs-on-failure ()
+  (unwind-protect
+      (progn
+        (defvar ert-gwt-test--teardown-ran)
+        (ert-gwt-deftest
+          (:describe "Teardown On Failure")
+          (:teardown (setq ert-gwt-test--teardown-ran t))
+          (:when (error "Boom"))
+          (:then t))
+        (ert-info ("Evaluating ert-gwt-deftest registers the slug-named test")
+          (should (ert-test-boundp 'test-teardown-on-failure)))
+        (ert-info ("Running the failing test still runs :teardown, flag should be t")
+          (setq ert-gwt-test--teardown-ran nil)
+          (condition-case nil
+              (ert-run-test (ert-get-test 'test-teardown-on-failure))
+            (error nil))
+          (should (eq ert-gwt-test--teardown-ran t))))
+    (condition-case nil
+        (ert-delete-test 'test-teardown-on-failure)
+      (error nil))
+    (condition-case nil
+        (makunbound 'ert-gwt-test--teardown-ran)
+      (error nil))))
+
+(ert-deftest ert-gwt-test--expand-givens-nesting ()
+  "Expand-givens should nest lets and wrap thens in a progn."
+  (let* ((expanded (ert-gwt--expand-givens
+                    '((((foo 1))) (((bar 2)) (setq bar (1+ bar))))
+                    '(= foo bar)
+                    '(t)))
+         (outer expanded))
+    (ert-info ("Outer form should begin with a let")
+      (should (consp outer))
+      (should (memq (car outer) '(let let*))))
+    (ert-info ("First given's bindings form the outer let bindings")
+      (should (equal (cadr outer) '((foo 1)))))
+    (ert-info ("Inner nested form should also begin with a let")
+      (let ((inner (nth 2 outer)))
+        (should (consp inner))
+        (should (memq (car inner) '(let let*)))
+        (ert-info ("Base of inner let should be a progn wrapping when and thens")
+          (let ((base (nth 3 inner)))
+            (should (consp base))
+            (should (eq (car base) 'progn))
+            (ert-info ("Progn cadr should be the when form")
+              (should (equal (cadr base) '(= foo bar))))
+            (ert-info ("Progn should contain the then body")
+              (should (member '(should t) (nthcdr 2 base))))))))))
+
+(ert-deftest ert-gwt-test--temp-file-registration ()
+  "Verify that `ert-gwt--temp-file' creates the file on disk and registers it in `ert-gwt--tracked-files'.  Both assertions are plain `should' forms so failure messages are self-explanatory in the *ert* buffer."
+  (let (ert-gwt--tracked-files path)
+    (unwind-protect
+        (progn
+          (setq path (ert-gwt--temp-file "gwt-test"))
+          ;; Temp file must exist on disk after creation.
+          (should (file-exists-p path))
+          ;; Temp file must be registered in the tracker list.
+          (should (member path ert-gwt--tracked-files)))
+      (when (and path (file-exists-p path))
+        (delete-file path)))))
+
+(ert-deftest ert-gwt-test--cleanup ()
+  "Cleanup kills tracked buffers and files, resets tracker."
+  (let* ((pre-buffers (buffer-list))
+         ert-gwt--tracked-files
+         buf path)
+    (unwind-protect
+        (progn
+          (setq buf (generate-new-buffer " *gwt-cleanup-test*"))
+          (setq path (ert-gwt--temp-file "gwt-cleanup"))
+          (ert-gwt--cleanup pre-buffers)
+          (ert-info ("Tracked buffer must be killed")
+            (should-not (buffer-live-p buf)))
+          (ert-info ("Tracked file must be deleted")
+            (should-not (file-exists-p path)))
+          (ert-info ("Tracker must be reset to nil")
+            (should (null ert-gwt--tracked-files))))
+      (when (file-exists-p path)
+        (delete-file path))
+      (when (buffer-live-p buf)
+        (kill-buffer buf)))))
+
 ;;; End-to-end macro behavior
 
 (ert-gwt-deftest
