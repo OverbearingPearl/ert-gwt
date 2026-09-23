@@ -36,38 +36,15 @@ lookup for the main module's directory, then to
 
 (require 'ert-gwt)
 
-;;; Slugify
-
-(ert-deftest ert-gwt-test--slugify-basic ()
-  (ert-info ("Slugify lowercases and hyphenates a plain description")
-    (should (equal (ert-gwt--slugify "User logs in")
-                   "user-logs-in"))))
-
-(ert-deftest ert-gwt-test--slugify-punctuation-and-space ()
-  (ert-info ("Slug of \"  Hello, World!  \" trims edges and\n collapses punctuation runs to one hyphen, expecting\n \"hello-world\"")
-    (should (equal (ert-gwt--slugify "  Hello, World!  ")
-                   "hello-world"))))
-
-(ert-deftest ert-gwt-test--slugify-only-punctuation ()
-  (ert-info ("Slug of an all-punctuation string is the empty string")
-    (should (equal (ert-gwt--slugify "---") ""))))
-
-(ert-deftest ert-gwt-test--slugify-mixed-case ()
-  (ert-info ("Slug of \"Agent Deletes Mail\" is \"agent-deletes-mail\"")
-    (should (equal (ert-gwt--slugify "Agent Deletes Mail")
-                   "agent-deletes-mail"))))
-
 ;;; Clause parsing
 
 (ert-deftest ert-gwt-test--parse-full-clauses ()
   (let ((parsed (ert-gwt--parse-clauses
-                 '((:describe "a test")
-                   (:given ((x 1)) (setq x (1+ x)))
+                 '((:given ((x 1)) (setq x (1+ x)))
                    (:when (ignore x))
                    (:then (not (null x)))
                    (:then t)))))
-    (ert-info ("A full clause set parses into describe and a list of givens\n plus thens")
-      (should (equal (plist-get parsed :describe) "a test"))
+    (ert-info ("A full clause set parses into a list of givens\n plus thens")
       (should (equal (plist-get parsed :givens)
                      '((((x 1)) (setq x (1+ x))))))
       (should (= (length (plist-get parsed :thens)) 2)))))
@@ -104,36 +81,33 @@ lookup for the main module's directory, then to
 
 ;;; Naming
 
-(ert-deftest ert-gwt-test--name-uses-describe-slug ()
-  (let ((parsed (ert-gwt--parse-clauses
-                 '((:describe "Login Redirects")
-                   (:when t) (:then t)))))
-    (ert-info ("A :describe clause yields the slug name\n test-login-redirects")
-      (should (eq (ert-gwt--name parsed)
-                  'test-login-redirects)))))
+(ert-deftest ert-gwt-test--name-rejects-describe ()
+  (ert-info ("A :describe clause is rejected since :describe was removed\n and the error message mentions :describe")
+    (let ((err (should-error (ert-gwt--parse-clauses
+                              '((:describe "Login Redirects")
+                                (:when t) (:then t))))))
+      (should (string-match-p ":describe" (error-message-string err))))))
 
 (ert-deftest ert-gwt-test--name-anonymous-counter ()
   (let ((ert-gwt--counter 0))
     (with-temp-buffer
       (ert-info ("Anonymous :name yields test-gwt-N, expected test-gwt-1 then test-gwt-2")
-        (let* ((first (ert-gwt--name
-                       (ert-gwt--parse-clauses '((:when t) (:then t)))))
-               (second (ert-gwt--name
-                        (ert-gwt--parse-clauses '((:when t) (:then t))))))
+        (let ((first (ert-gwt--name))
+              (second (ert-gwt--name)))
           (should (eq first 'test-gwt-1))
           (should (eq second 'test-gwt-2)))))))
 
-(ert-deftest ert-gwt-test--parse-teardown-and-bare-given ()
-  (ert-info ("Parse collects :teardowns as ((foo) (bar) (baz)) in order")
+(ert-deftest ert-gwt-test--parse-cleanup-and-bare-given ()
+  (ert-info ("Parse collects :cleanups as ((foo) (bar) (baz)) in order")
     (let ((plist (ert-gwt--parse-clauses
                   '((:given (x) (setq x 1))
-                    (:teardown (foo))
-                    (:teardown (bar) (baz))
+                    (:cleanup (foo))
+                    (:cleanup (bar) (baz))
                     (:when t)
                     (:then t)))))
-      (should (equal (plist-get plist :teardowns)
+      (should (equal (plist-get plist :cleanups)
                      '((foo) (bar) (baz))))))
-  (ert-info ("Bare :given (non-binding rest) recorded as ((nil (message \"hi\")))")
+  (ert-info ("Bare :given (non-binding rest) recorded as ((nil (message \"hi\"))); :cleanups unsupported here")
     (let ((plist (ert-gwt--parse-clauses
                   '((:given (message "hi")) (:when t) (:then t)))))
       (should (equal (plist-get plist :givens)
@@ -141,28 +115,31 @@ lookup for the main module's directory, then to
 
 ;; The anonymous test defun left behind by this test is cleared on the
 ;; next full run: ert-gwt-test-run calls ert-delete-all-tests first.
-(ert-deftest ert-gwt-test--deftest-teardown-runs-on-failure ()
+(ert-deftest ert-gwt-test--deftest-cleanup-runs-on-failure ()
   (unwind-protect
       (progn
-        (defvar ert-gwt-test--teardown-ran)
-        (ert-gwt-deftest
-          (:describe "Teardown On Failure")
-          (:teardown (setq ert-gwt-test--teardown-ran t))
-          (:when (error "Boom"))
-          (:then t))
-        (ert-info ("Evaluating ert-gwt-deftest registers the slug-named test")
-          (should (ert-test-boundp 'test-teardown-on-failure)))
-        (ert-info ("Running the failing test still runs :teardown, flag should be t")
-          (setq ert-gwt-test--teardown-ran nil)
-          (condition-case nil
-              (ert-run-test (ert-get-test 'test-teardown-on-failure))
-            (error nil))
-          (should (eq ert-gwt-test--teardown-ran t))))
+        (defvar ert-gwt-test--cleanup-ran)
+        (let ((ert-gwt-test--cleanup-ran nil)
+              (pre ert-gwt--counter))
+          (eval '(ert-gwt-deftest
+                   (:cleanup (setq ert-gwt-test--cleanup-ran t))
+                   (:when (error "Boom"))
+                   (:then t))
+                t)
+          (let ((expected-name (intern (format "test-gwt-%d" (1+ pre)))))
+            (ert-info ("Evaluating ert-gwt-deftest registers the anonymous test")
+              (should (ert-test-boundp expected-name)))
+            (ert-info ("Running the failing test still runs :cleanup, flag should be t")
+              (setq ert-gwt-test--cleanup-ran nil)
+              (condition-case nil
+                  (ert-run-test (ert-get-test expected-name))
+                (error nil))
+              (should (eq ert-gwt-test--cleanup-ran t)))
+            (ert-info ("The anonymous test is deleted so nothing leaks")
+              (ert-delete-test expected-name)
+              (should-not (ert-test-boundp expected-name))))))
     (condition-case nil
-        (ert-delete-test 'test-teardown-on-failure)
-      (error nil))
-    (condition-case nil
-        (makunbound 'ert-gwt-test--teardown-ran)
+        (makunbound 'ert-gwt-test--cleanup-ran)
       (error nil))))
 
 (ert-deftest ert-gwt-test--expand-givens-nesting ()
@@ -227,25 +204,21 @@ lookup for the main module's directory, then to
 ;;; End-to-end macro behavior
 
 (ert-gwt-deftest
-    (:describe "passing test without given bindings")
   (:when t)
   (:then t))
 
 (ert-gwt-deftest
-    (:describe "given bindings are visible to when and then")
   (:given ((x 1) (y 2)))
   (:when nil)
   (:then (= (+ x y) 3)))
 
 (ert-gwt-deftest
-    (:describe "given setup forms run before when")
   (:given ((z 0))
           (setq z (1+ z)))
   (:when (setq z (* 2 z)))
   (:then (= z 2)))
 
 (ert-gwt-deftest
-    (:describe "multiple then clauses all checked")
   (:given ((n 2)))
   (:when (setq n (* n n)))
   (:then (= n 4))
@@ -260,7 +233,7 @@ lookup for the main module's directory, then to
     (unwind-protect
         (progn
           (ert-run-test
-           (ert-get-test 'ert-gwt-test--name-uses-describe-slug))
+           (ert-get-test 'ert-gwt-test--name-rejects-describe))
           (ert-info ("Buffer-list is unchanged by the test run")
             (should (equal before (buffer-list)))))
       ;; Nothing to clean up here, but the guard shows the intent:

@@ -31,7 +31,7 @@ clauses.
 ## Features
 
 - **Anonymous by default.** No name required. The macro generates
-  `test-gwt-N` or derives a name from `:describe`.
+  `test-gwt-N`.
 - **GWT as structure, not strings.** `:given`, `:when`, `:then` are
   syntactic clauses, not parsed text. No `.feature` files, no regex step
   matching.
@@ -39,8 +39,6 @@ clauses.
   filters, batch runners, and CI integration keep working.
 - **Zero dependencies.** No Buttercup, no Ecukes, no Cask. One `defmacro`
   plus a counter.
-- **Optional `:describe`.** If you want a readable name in the test report,
-  add it. Otherwise, the macro stays out of your way.
 
 ## Installation
 
@@ -75,24 +73,11 @@ Expands to:
 
 ```elisp
 (ert-deftest test-gwt-1 ()
-  "anonymous GWT test"
+  "Anonymous GWT-style test defined by `ert-gwt-deftest'."
   (let ((user (make-user "alice" "secret")))
     (login user)
     (should (login-redirects-to-home-p user))))
 ```
-
-### With `:describe`
-
-```elisp
-(ert-gwt-deftest
-  (:describe "login redirects to home")
-  (:given ((user (make-user "alice" "secret"))))
-  (:when  (login user))
-  (:then  (login-redirects-to-home-p user)))
-```
-
-The test name becomes `test-login-redirects-to-home`, which is more
-readable in ERT reports.
 
 ### Multiple `:then` clauses
 
@@ -124,11 +109,10 @@ Each `:then` expression is wrapped in `should` automatically.
 
 | Clause | Required? | How many |
 |---|---|---|
-| `:describe` | optional | at most one |
 | `:given` | optional | zero or more, nested in order |
 | `:when` | required | exactly one |
 | `:then` | required | one or more |
-| `:teardown` | optional | zero or more, run in order |
+| `:cleanup` | optional | zero or more, run in order |
 
 Automatic cleanup always runs unconditionally, even when the test
 fails: buffers created during the test are killed under
@@ -150,10 +134,6 @@ automatically afterwards.
 3. **No framework, no dependencies.**
    One macro, one counter, one `provide`. If you can `require` something,
    you can use `ert-gwt`.
-
-4. **Anonymous by default, readable on demand.**
-   You should not have to name a test to write it. But if you want a name
-   in the report, `:describe` gives it to you.
 
 ## Comparison
 
