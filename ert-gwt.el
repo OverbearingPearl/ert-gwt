@@ -123,15 +123,16 @@ collected in order)."
           :cleanups cleanups)))
 
 (defun ert-gwt--expand-givens (GIVENS WHEN-FORM THENS CLEANUPS)
-  "Build nested `let' forms binding GIVEN segments around WHEN-FORM and THENS.
+  "Build nested `let*' forms binding GIVEN segments around WHEN-FORM and THENS.
 GIVENS is a list of GIVEN segments, each a list whose car is a
-`let' binding list and whose cdr is the segment body.  WHEN-FORM
-is the WHEN clause form to evaluate.  THENS is a list of THEN
-forms, each wrapped in `should'.  CLEANUPS is a list of cleanup
-forms run on unwind, inside the scope of every given binding."
+binding list and whose cdr is the segment body.  Bindings within a
+segment see earlier ones, as in `let*'.  WHEN-FORM is the WHEN
+clause form to evaluate.  THENS is a list of THEN forms, each
+wrapped in `should'.  CLEANUPS is a list of cleanup forms run on
+unwind, inside the scope of every given binding."
   (if GIVENS
       (let ((segment (car GIVENS)))
-        `(let ,(car segment)
+        `(let* ,(car segment)
            ,@(cdr segment)
            ,(ert-gwt--expand-givens (cdr GIVENS) WHEN-FORM THENS CLEANUPS)))
     `(unwind-protect
