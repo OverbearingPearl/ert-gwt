@@ -39,6 +39,28 @@
 ;; with `ert-gwt--temp-file' are deleted, all inside
 ;; `unwind-protect' even when the test fails.
 ;;
+;; Because each `:given' segment expands to a `let' that wraps every
+;; later clause, setup forms inside `:given' -- including stubs --
+;; stay in effect through `:when' and `:then'.  A stub is just part
+;; of the world state, so it belongs in `:given':
+;;
+;;     (ert-gwt-deftest
+;;       (:given ((file (ert-gwt--temp-file "data.txt"))
+;;                (old "old contents")
+;;                (new "new contents")
+;;                (with-temp-file file (insert old))))
+;;       (:given (cl-letf (((symbol-function (function yes-or-no-p)
+;;                          (lambda (_prompt) t)))))
+;;       (:when  (with-temp-file file (insert new)))
+;;       (:then  (string= "new contents"
+;;                        (with-temp-buffer
+;;                          (insert-file-contents file)
+;;                          (buffer-string)))))
+;;
+;; Here the file, its contents and the stubbed prompt answer are
+;; world state in `:given'; `:when' is one user action; `:then'
+;; observes only the result.
+;;
 ;; There are no dependencies beyond ERT itself.  One macro, one
 ;; counter, one `provide'.
 
@@ -154,25 +176,61 @@ Each element of CLAUSES is one of:
   (:when FORM)               the action under test (exactly one)
   (:then FORM)               an expectation (one or more)
   (:cleanup FORM...)         cleanup forms, evaluated in order inside
-                             the `unwind-protect' before
-                             `ert-gwt--cleanup', so they run even
+                             the \\=`unwind-protect' before
+                             \\=`ert-gwt--cleanup', so they run even
                              when the test fails
 
-The macro expands to an `ert-deftest' whose body evaluates the
-`:given' clauses in order, runs the `:when' form, and wraps every
-`:then' form in `should'.  The test body and the user-supplied
-`:cleanup' forms run under `unwind-protect', so cleanup happens
+The macro expands to an \\=`ert-deftest' whose body evaluates the
+\\=`:given' clauses in order, runs the \\=`:when' form, and wraps every
+\\=`:then' form in \\=`should'.  The test body and the user-supplied
+\\=`:cleanup' forms run under \\=`unwind-protect', so cleanup happens
 unconditionally even on failure.  After the cleanup forms,
-`ert-gwt--cleanup' performs automatic cleanup: buffers created
+\\=`ert-gwt--cleanup' performs automatic cleanup: buffers created
 during the test are killed, and temp files created via
-`ert-gwt--temp-file' are deleted (files created by any other
+\\=`ert-gwt--temp-file' are deleted (files created by any other
 means are not tracked and are not removed).  Buffers that existed
 before the test are never touched, because the snapshot in
-`ert-gwt--pre-buffers' is captured via `buffer-list' at the very
+\\=`ert-gwt--pre-buffers' is captured via \\=`buffer-list' at the very
 start of the test body, before any clause runs; consequently
 buffers created before the macro expansion's body executes (i.e.,
 outside this macro) are outside the snapshot's diff and are
-preserved."  (declare (indent 0))
+preserved.
+
+Standard example.  The scenario: an old file already exists on
+disk; the user approves an overwrite prompt; afterwards the file
+holds the new contents.  Everything that sets up the world --
+the temp file (made with \\=`ert-gwt--temp-file' so it is tracked),
+its old and new contents, and the stub answering \"y\" -- belongs
+in \\=`:given'.  A stub is written as a given too: a \\=`cl-letf'
+rebinding placed inside \\=`:given', which works because each
+\\=`:given' segment expands to a \\=`let' that wraps all later givens,
+the \\=`:when', and every \\=`:then', so a stub binding there covers
+the whole scenario without leaving the GWT vocabulary.  \\=`:when'
+is the single user action (saving the new contents), and each
+\\=`:then' states an observable outcome in business language (the
+file now contains the new text).
+
+  (ert-gwt-deftest
+    (:given (file (ert-gwt--temp-file \"data.txt\"))
+            (old \"old contents\")
+            (new \"new contents\")
+            (with-temp-file file (insert old)))
+    (:given (cl-letf (((symbol-function (function yes-or-no-p)
+                       (lambda (_prompt) t)))))
+    (:when (with-temp-file file (insert new)))
+    (:then (should (equal \"new contents\"
+                          (with-temp-buffer
+                            (insert-file-contents file)
+                            (buffer-string)))))
+    (:cleanup (delete-file file)))
+
+Here the temp file, its old and new contents, and the stubbed
+prompt answer are world state, placed in \\=`:given'; \\=`:when' is
+exactly one action, the call under test; and \\=`:then' observes
+only its result, in terms a user would recognize.  Anything not
+observable from outside the code under test does not belong in
+\\=`:then'."
+  (declare (indent 0))
   (let* ((parsed (ert-gwt--parse-clauses clauses))
          (name (ert-gwt--name))
          (givens (plist-get parsed :givens))

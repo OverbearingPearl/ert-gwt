@@ -121,6 +121,33 @@ fails: buffers created during the test are killed under
 inside `:given` to create temporary files that are removed
 automatically afterwards.
 
+### The standard example
+
+```elisp
+(ert-deftest replacing-a-file ()
+  (ert-gwt
+   :given "a temp file holding an old draft"
+   (let ((path (ert-gwt--temp-file "old draft\n"))
+         (new-content "polished draft\n"))
+     (cl-letf (((symbol-function 'read-string)
+                (lambda (&rest _) new-content)))
+       :given "the editor asks for replacement text"
+       :when "I replace the file's contents"
+       (ert-gwt--replace-contents path)
+       :then "the file contains the new draft"
+       (should (equal (ert-gwt--read path) new-content))
+       :then "the old draft is gone"
+       (should-not (equal (ert-gwt--read path) "old draft\n"))))))
+```
+
+Note what the example does and does not do. The stub of the collaborator's
+response (`cl-letf` on `read-string`) lives inside the first `:given`, which is
+legitimate because each `:given` segment expands to a `let` wrapping every
+later given, the `:when`, and all `:then`s — so the stub is simply part of the
+given world, and GWT never needs a mock concept of its own. The `:when` is
+exactly one user action, and each `:then` states an observable outcome in the
+user's language, so the test reads the way the user experiences it.
+
 ## Design principles
 
 1. **Structure belongs in structure, not in names.**
