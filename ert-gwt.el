@@ -162,8 +162,20 @@ and delete tracked temp files."
   (setq ert-gwt--tracked-files nil))
 
 (defun ert-gwt--name ()
-  "Return the next anonymous ERT test name `test-gwt-N'."
-  (intern (format "test-gwt-%d" (cl-incf ert-gwt--counter))))
+  "Return the next anonymous ERT test name `<prefix>-N'.
+
+The prefix is derived from the file being loaded at macro-expansion
+time: `load-file-name' is bound while the file defining the test is
+being loaded, so `file-name-base' of e.g. \"mm-test.el\" yields the
+prefix \"mm-test\".  Fall back to the prefix \"test-gwt\" when
+`load-file-name' is nil (e.g. tests running after load, interactive
+eval), which yields names like \"test-gwt-1\"."
+  (intern
+   (format "%s-%d"
+           (if load-file-name
+               (file-name-base load-file-name)
+             "test-gwt")
+           (cl-incf ert-gwt--counter))))
 
 (defmacro ert-gwt-deftest (&rest clauses)
   "Define an anonymous GWT-style ERT test from CLAUSES.

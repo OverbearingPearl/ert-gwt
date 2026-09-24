@@ -89,9 +89,10 @@ lookup for the main module's directory, then to
       (should (string-match-p ":describe" (error-message-string err))))))
 
 (ert-deftest ert-gwt-test--name-anonymous-counter ()
-  (let ((ert-gwt--counter 0))
+  (let ((ert-gwt--counter 0)
+        (load-file-name nil))
     (with-temp-buffer
-      (ert-info ("Anonymous :name yields test-gwt-N, expected test-gwt-1 then test-gwt-2")
+      (ert-info ("Anonymous :name with no load-file-name yields fallback prefix, expected test-gwt-1 then test-gwt-2")
         (let ((first (ert-gwt--name))
               (second (ert-gwt--name)))
           (should (eq first 'test-gwt-1))
@@ -120,6 +121,7 @@ lookup for the main module's directory, then to
       (progn
         (defvar ert-gwt-test--cleanup-ran)
         (let ((ert-gwt-test--cleanup-ran nil)
+              (load-file-name nil)
               (pre ert-gwt--counter))
           (eval '(ert-gwt-deftest
                    (:cleanup (setq ert-gwt-test--cleanup-ran t))
