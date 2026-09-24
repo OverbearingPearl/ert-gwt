@@ -145,11 +145,12 @@ lookup for the main module's directory, then to
       (error nil))))
 
 (ert-deftest ert-gwt-test--expand-givens-nesting ()
-  "Expand-givens should nest lets and wrap thens in a progn."
+  "Expand-givens should nest lets and wrap thens in a progn inside `unwind-protect'."
   (let* ((expanded (ert-gwt--expand-givens
                     '((((foo 1))) (((bar 2)) (setq bar (1+ bar))))
                     '(= foo bar)
-                    '(t)))
+                    '(t)
+                    nil))
          (outer expanded))
     (ert-info ("Outer form should begin with a let")
       (should (consp outer))
@@ -160,14 +161,18 @@ lookup for the main module's directory, then to
       (let ((inner (nth 2 outer)))
         (should (consp inner))
         (should (memq (car inner) '(let let*)))
-        (ert-info ("Base of inner let should be a progn wrapping when and thens")
+        (ert-info ("Base of inner let should be an unwind-protect")
           (let ((base (nth 3 inner)))
             (should (consp base))
-            (should (eq (car base) 'progn))
-            (ert-info ("Progn cadr should be the when form")
-              (should (equal (cadr base) '(= foo bar))))
-            (ert-info ("Progn should contain the then body")
-              (should (member '(should t) (nthcdr 2 base))))))))))
+            (should (eq (car base) 'unwind-protect))
+            (ert-info ("Unwind-protect body should be a progn wrapping when and thens")
+              (let ((body (cadr base)))
+                (should (consp body))
+                (should (eq (car body) 'progn))
+                (ert-info ("Progn cadr should be the when form")
+                  (should (equal (cadr body) '(= foo bar))))
+                (ert-info ("Progn should contain the then body wrapped in should")
+                  (should (member '(should t) (nthcdr 2 body))))))))))))
 
 (ert-deftest ert-gwt-test--temp-file-registration ()
   "Verify that `ert-gwt--temp-file' creates the file on disk and registers it in `ert-gwt--tracked-files'.  Both assertions are plain `should' forms so failure messages are self-explanatory in the *ert* buffer."

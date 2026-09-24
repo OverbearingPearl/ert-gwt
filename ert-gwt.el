@@ -122,19 +122,22 @@ collected in order)."
           :thens (nreverse thens)
           :cleanups cleanups)))
 
-(defun ert-gwt--expand-givens (GIVENS WHEN-FORM THENS)
+(defun ert-gwt--expand-givens (GIVENS WHEN-FORM THENS CLEANUPS)
   "Build nested `let' forms binding GIVEN segments around WHEN-FORM and THENS.
 GIVENS is a list of GIVEN segments, each a list whose car is a
 `let' binding list and whose cdr is the segment body.  WHEN-FORM
 is the WHEN clause form to evaluate.  THENS is a list of THEN
-forms, each wrapped in `should'."
+forms, each wrapped in `should'.  CLEANUPS is a list of cleanup
+forms run on unwind, inside the scope of every given binding."
   (if GIVENS
       (let ((segment (car GIVENS)))
         `(let ,(car segment)
            ,@(cdr segment)
-           ,(ert-gwt--expand-givens (cdr GIVENS) WHEN-FORM THENS)))
-    `(progn ,WHEN-FORM
-            ,@(mapcar (lambda (then) `(should ,then)) THENS))))
+           ,(ert-gwt--expand-givens (cdr GIVENS) WHEN-FORM THENS CLEANUPS)))
+    `(unwind-protect
+         (progn ,WHEN-FORM
+                ,@(mapcar (lambda (then) `(should ,then)) THENS))
+       ,@CLEANUPS)))
 
 (defvar ert-gwt--tracked-files nil "Temporary files created via `ert-gwt--temp-file', deleted after each test.")
 
@@ -158,7 +161,9 @@ and delete tracked temp files."
         (kill-buffer buf))))
   (dolist (file ert-gwt--tracked-files)
     (when (file-exists-p file)
-      (delete-file file)))
+      (if (file-directory-p file)
+          (delete-directory file t)
+        (delete-file file))))
   (setq ert-gwt--tracked-files nil))
 
 (defun ert-gwt--name ()
@@ -187,8 +192,9 @@ Each element of CLAUSES is one of:
                              so later givens see earlier bindings
   (:when FORM)               the action under test (exactly one)
   (:then FORM)               an expectation (one or more)
-  (:cleanup FORM...)         cleanup forms, evaluated in order inside
-                             the \\=`unwind-protect' before
+  (:cleanup FORM...)         cleanup forms, evaluated in order
+                             inside the innermost given \\=`let' and
+                             under the \\=`unwind-protect' before
                              \\=`ert-gwt--cleanup', so they run even
                              when the test fails
 
@@ -196,17 +202,19 @@ The macro expands to an \\=`ert-deftest' whose body evaluates the
 \\=`:given' clauses in order, runs the \\=`:when' form, and wraps every
 \\=`:then' form in \\=`should'.  The test body and the user-supplied
 \\=`:cleanup' forms run under \\=`unwind-protect', so cleanup happens
-unconditionally even on failure.  After the cleanup forms,
-\\=`ert-gwt--cleanup' performs automatic cleanup: buffers created
-during the test are killed, and temp files created via
-\\=`ert-gwt--temp-file' are deleted (files created by any other
-means are not tracked and are not removed).  Buffers that existed
-before the test are never touched, because the snapshot in
-\\=`ert-gwt--pre-buffers' is captured via \\=`buffer-list' at the very
-start of the test body, before any clause runs; consequently
-buffers created before the macro expansion's body executes (i.e.,
-outside this macro) are outside the snapshot's diff and are
-preserved.
+unconditionally even on failure.  The \\=`:cleanup' forms are
+evaluated inside the nested given scope, after the \\=`:when' and
+\\=`:then' forms, so they can refer to any given binding.  After
+the cleanup forms, \\=`ert-gwt--cleanup' performs automatic
+cleanup: buffers created during the test are killed, and temp
+files created via \\=`ert-gwt--temp-file' are deleted (files created
+by any other means are not tracked and are not removed).  Buffers
+that existed before the test are never touched, because the
+snapshot in \\=`ert-gwt--pre-buffers' is captured via \\=`buffer-list'
+at the very start of the test body, before any clause runs;
+consequently buffers created before the macro expansion's body
+executes (i.e., outside this macro) are outside the snapshot's
+diff and are preserved.
 
 Standard example.  The scenario: an old file already exists on
 disk; the user approves an overwrite prompt; afterwards the file
@@ -216,11 +224,11 @@ its old and new contents, and the stub answering \"y\" -- belongs
 in \\=`:given'.  A stub is written as a given too: a \\=`cl-letf'
 rebinding placed inside \\=`:given', which works because each
 \\=`:given' segment expands to a \\=`let' that wraps all later givens,
-the \\=`:when', and every \\=`:then', so a stub binding there covers
-the whole scenario without leaving the GWT vocabulary.  \\=`:when'
-is the single user action (saving the new contents), and each
-\\=`:then' states an observable outcome in business language (the
-file now contains the new text).
+the \\=`:when', every \\=`:then', and the \\=`:cleanup' forms, so a stub
+binding there covers the whole scenario without leaving the GWT
+vocabulary.  \\=`:when' is the single user action (saving the new
+contents), and each \\=`:then' states an observable outcome in
+business language (the file now contains the new text).
 
   (ert-gwt-deftest
     (:given (file (ert-gwt--temp-file \"data.txt\"))
@@ -253,8 +261,7 @@ observable from outside the code under test does not belong in
        "Anonymous GWT-style test defined by `ert-gwt-deftest'."
        (let ((ert-gwt--pre-buffers (buffer-list)))
          (unwind-protect
-             ,(ert-gwt--expand-givens givens when-form thens)
-           ,@cleanups
+             ,(ert-gwt--expand-givens givens when-form thens cleanups)
            (ert-gwt--cleanup ert-gwt--pre-buffers))))))
 
 (provide 'ert-gwt)
