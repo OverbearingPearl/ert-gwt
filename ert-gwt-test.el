@@ -93,8 +93,8 @@ lookup for the main module's directory, then to
         (load-file-name nil))
     (with-temp-buffer
       (ert-info ("Anonymous :name with no clauses and no load-file-name yields fallback prefix, expected test-gwt-1 then test-gwt-2")
-        (let ((first (ert-gwt--name nil))
-              (second (ert-gwt--name nil)))
+        (let ((first (ert-gwt--name))
+              (second (ert-gwt--name)))
           (should (eq first 'test-gwt-1))
           (should (eq second 'test-gwt-2)))))))
 
@@ -147,34 +147,46 @@ lookup for the main module's directory, then to
       (error nil))))
 
 (ert-deftest ert-gwt-test--expand-givens-nesting ()
-  "Expand-givens should nest lets and wrap thens in a progn inside `unwind-protect'."
-  (let* ((expanded (ert-gwt--expand-givens
-                    '((((foo 1))) (((bar 2)) (setq bar (1+ bar))))
-                    '(= foo bar)
-                    '(t)
-                    nil))
-         (outer expanded))
-    (ert-info ("Outer form should begin with a let")
-      (should (consp outer))
-      (should (memq (car outer) '(let let*))))
-    (ert-info ("First given's bindings form the outer let bindings")
-      (should (equal (cadr outer) '((foo 1)))))
-    (ert-info ("Inner nested form should also begin with a let")
-      (let ((inner (nth 2 outer)))
-        (should (consp inner))
-        (should (memq (car inner) '(let let*)))
-        (ert-info ("Base of inner let should be an unwind-protect")
-          (let ((base (nth 3 inner)))
-            (should (consp base))
-            (should (eq (car base) 'unwind-protect))
-            (ert-info ("Unwind-protect body should be a progn wrapping when and thens")
-              (let ((body (cadr base)))
-                (should (consp body))
-                (should (eq (car body) 'progn))
-                (ert-info ("Progn cadr should be the when form")
-                  (should (equal (cadr body) '(= foo bar))))
-                (ert-info ("Progn should contain the then body wrapped in should")
-                  (should (member '(should t) (nthcdr 2 body))))))))))))
+  "Expand-givens should build a single info form joined from the GIVEN lines.
+The message is computed at expansion time.  The `ert-info' wraps a `let*'
+over all segment bindings whose body holds the segment setup forms,
+then a `let' of the runtime note variables whose body is the unwind
+protection.  Its protected form is a `progn' of three elements:
+an `ert-info' with a runtime message form wrapping only a
+`condition-case' around a `progn' of the WHEN form, the THEN cond form, and
+the `ert-gwt--first-error' summary starting with `when'."
+  (let ((expanded (ert-gwt--expand-givens
+                   '((((foo 1))) (((bar 2)) (setq bar (1+ bar))))
+                   '(= foo bar)
+                   '(t)
+                   nil)))
+    (should (consp expanded))
+    (should (eq (car expanded) 'ert-info))
+    (should (stringp (car (nth 1 expanded))))
+    (let ((let* (nth 2 expanded)))
+      (should (eq (car let*) 'let*))
+      (should (equal (cadr let*) '((foo 1) (bar 2))))
+      (let ((body (cddr let*)))
+        (should (equal (car body) '(setq bar (1+ bar))))
+        (let ((leaf (nth 1 body)))
+          (should (eq (car leaf) 'let))
+          (let ((up (nth 2 leaf)))
+            (should (eq (car up) 'unwind-protect))
+            (let ((progn (cadr up)))
+              (should (eq (car progn) 'progn))
+              (should (= (length progn) 4))
+              (let ((when-info (nth 1 progn)))
+                (should (eq (car when-info) 'ert-info))
+                (should (consp (nth 1 when-info)))
+                (let ((inner (nthcdr 2 when-info)))
+                  (should (= (length inner) 1))
+                  (let ((cc (car inner)))
+                    (should (eq (car cc) 'condition-case))
+                    (should (equal (nth 2 cc) '(progn (= foo bar)))))))
+              (let ((then-cond (nth 2 progn)))
+                (should (eq (car then-cond) 'cond)))
+              (let ((summary (nth 3 progn)))
+                (should (eq (car summary) 'when))))))))))
 
 (ert-deftest ert-gwt-test--temp-file-registration ()
   "Verify that `ert-gwt--temp-file' creates the file on disk and registers it in `ert-gwt--tracked-files'.  Both assertions are plain `should' forms so failure messages are self-explanatory in the *ert* buffer."
