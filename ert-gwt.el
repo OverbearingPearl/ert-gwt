@@ -78,6 +78,28 @@
 Buffers created afterwards are killed by the test's `unwind-protect',
 so a test never leaves extra buffers behind.")
 
+(defun ert-gwt--advice-find-test-other-window (orig-fn test-name-string)
+  "Advice around `ert-find-test-other-window'.
+
+Call ORIG-FN.  TEST-NAME-STRING is the name of the test being jumped
+to.
+
+When the default literal search failed and left point
+at `point-min' (the generated name is not present in the source
+text), look up the defining file recorded in the `ert-gwt--defining-file'
+symbol property of the test name and jump there instead.  Removes the
+advice's own bookkeeping: the property is written at macro expansion time."
+  (let ((result (funcall orig-fn test-name-string)))
+    (when (= (point) (point-min))
+      (let ((file (get (intern-soft test-name-string)
+                       'ert-gwt--defining-file)))
+        (when (and file (file-exists-p file))
+          (find-file-other-window file)
+          (goto-char (point-min)))))
+    result))
+
+(advice-add 'ert-find-test-other-window :around #'ert-gwt--advice-find-test-other-window)
+
 (when (and (boundp 'load-file-name) load-file-name)
   (let ((dir (file-name-directory load-file-name)))
     (add-to-list 'load-path dir)
@@ -167,21 +189,39 @@ and delete tracked temp files."
         (delete-file file))))
   (setq ert-gwt--tracked-files nil))
 
-(defun ert-gwt--name ()
-  "Return the next anonymous ERT test name `<prefix>-N'.
+(defun ert-gwt--name (clauses)
+  "Return the next ERT test name `<prefix>-<slug>-N'.
 
 The prefix is derived from the file being loaded at macro-expansion
 time: `load-file-name' is bound while the file defining the test is
 being loaded, so `file-name-base' of e.g. \"mm-test.el\" yields the
 prefix \"mm-test\".  Fall back to the prefix \"test-gwt\" when
 `load-file-name' is nil (e.g. tests running after load, interactive
-eval), which yields names like \"test-gwt-1\"."
-  (intern
-   (format "%s-%d"
-           (if load-file-name
-               (file-name-base load-file-name)
-             "test-gwt")
-           (cl-incf ert-gwt--counter))))
+eval), which yields names like \"test-gwt-1\".
+
+A readable slug is built from the first few symbol names appearing
+in CLAUSES (skipping keywords and non-symbols); it is purely
+cosmetic.  The trailing counter keeps names unique even when
+different tests share the same clauses, so `ert \"XXX-\"' prefix
+filtering keeps working."
+  (let* ((slug
+          (mapconcat
+           (lambda (clause)
+             (and (consp clause)
+                  (cl-loop for form in clause
+                           when (and (symbolp form)
+                                     (not (keywordp form)))
+                           return (symbol-name form))))
+           clauses
+           "-"))
+         (slug (and slug (not (string= slug "")) slug)))
+    (intern
+     (format "%s-%s%d"
+             (if load-file-name
+                 (file-name-base load-file-name)
+               "test-gwt")
+             (if slug (concat slug "-") "")
+             (cl-incf ert-gwt--counter)))))
 
 (defmacro ert-gwt-deftest (&rest clauses)
   "Define an anonymous GWT-style ERT test from CLAUSES.
@@ -216,6 +256,13 @@ at the very start of the test body, before any clause runs;
 consequently buffers created before the macro expansion's body
 executes (i.e., outside this macro) are outside the snapshot's
 diff and are preserved.
+
+The macro also records the defining file at expansion time as a
+symbol property \\=`ert-gwt--defining-file' on the generated test
+name symbol; the advice in \\=`ert-gwt--find-test-navigate' reads
+that property to fix up \\=`ert-find-test-other-window' jumps for
+generated test names, which the default literal search cannot
+find in the source.
 
 Standard example.  The scenario: an old file already exists on
 disk; the user approves an overwrite prompt; afterwards the file
@@ -253,11 +300,15 @@ observable from outside the code under test does not belong in
 \\=`:then'."
   (declare (indent 0))
   (let* ((parsed (ert-gwt--parse-clauses clauses))
-         (name (ert-gwt--name))
+         (name (ert-gwt--name clauses))
          (givens (plist-get parsed :givens))
          (when-form (plist-get parsed :when))
          (thens (plist-get parsed :thens))
-         (cleanups (plist-get parsed :cleanups)))
+         (cleanups (plist-get parsed :cleanups))
+         (defining-file (and load-file-name
+                             (file-truename load-file-name))))
+    (when defining-file
+      (put name 'ert-gwt--defining-file defining-file))
     `(ert-deftest ,name ()
        "Anonymous GWT-style test defined by `ert-gwt-deftest'."
        (let ((ert-gwt--pre-buffers (buffer-list)))
