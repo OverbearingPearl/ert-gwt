@@ -200,6 +200,19 @@ expansion; `ert-gwt--clause-text' is reused to render every line."
   "Snapshot of `buffer-list' taken at `ert-gwt--deftest' body start.
 Used by `ert-gwt--cleanup' to detect buffers created during the test.")
 
+(defvar ert-gwt--then-notes nil
+  "List of collected THEN status note strings.
+Dynamically bound inside the generated test body by `ert-gwt'.")
+
+(defvar ert-gwt--aborted nil
+  "Non-nil once a WHEN or a THEN step failed.
+Later THEN steps are marked as not executed.  Dynamically bound
+inside the generated test body by `ert-gwt'.")
+
+(defvar ert-gwt--first-error nil
+  "The first error condition captured, re-signalled in the summary.
+Dynamically bound inside the generated test body by `ert-gwt'.")
+
 (defun ert-gwt--temp-file (&optional prefix)
   "Create a temp file named with PREFIX (or \"ert-gwt-\" by default).
 The file is deleted automatically after the test."
@@ -242,16 +255,18 @@ Used to echo GWT clause source into failure reports."
 
 (defun ert-gwt--expand-then (THEN)
   "Expand one THEN form, recording a status note for every THEN.
-On success an `ert-info' line plus a ✓ THEN note is recorded.  On
-failure a ✗ THEN note is recorded, the dynamically scoped flag
+An unmarked `ert-info' line labeled plainly THEN wraps the
+assertion.  On success a ✓ THEN note is recorded.  On failure a
+✗ THEN note is recorded, the dynamically scoped flag
 `ert-gwt--aborted' is set so later THENs are marked − THEN (not
 executed), and the first error is stored in
 `ert-gwt--first-error' for the caller to re-signal inside a
 summary `ert-info' after all THENs are accounted for.  Nothing is
-re-signalled here.  All note strings are computed at expansion
-time; nothing is evaluated during expansion.  Notes read e.g.
-\"✓ THEN: ...\"."
-  (let ((info-text (ert-gwt--clause-text "✓ THEN" THEN))
+re-signalled here.  The status marks appear only in the notes,
+not in the ert-info line.  All note strings are computed at
+expansion time; nothing is evaluated during expansion.  Notes
+read e.g. \"✓ THEN: ...\"."
+  (let ((info-text (ert-gwt--clause-text "THEN" THEN))
         (ok-note (ert-gwt--clause-text "✓ THEN" THEN))
         (fail-note (ert-gwt--clause-text "✗ THEN" THEN))
         (skip-note (ert-gwt--clause-text "− THEN" THEN)))
@@ -332,18 +347,18 @@ during the test are killed, and temp files created via
 \\=`ert-gwt--temp-file\\=' are deleted (files created by any other
 means are not tracked and are not removed).  Buffers that existed
 before the test are never touched, because the snapshot in
-\\=`ert-gwt--pre-buffers\\=' is captured via \\=`buffer-list\\=' at the very
-start of the test body, before any clause runs; consequently
+\\=`ert-gwt--initial-buffers\\=' is captured via \\=`buffer-list\\=' at the
+very start of the test body, before any clause runs; consequently
 buffers created before the macro expansion's body executes (i.e.,
 outside this macro) are outside the snapshot's diff and are
 preserved.
 
 The macro also records the defining file at expansion time as a
 symbol property \\=`ert-gwt--defining-file\\=' on the generated test name
-symbol; the advice in \\=`ert-gwt--find-test-navigate\\=' reads that
-property to fix up \\=`ert-find-test-other-window\\=' jumps for
-generated test names, which the default literal search cannot
-find in the source.
+symbol; the advice in \\=`ert-gwt--advice-find-test-other-window\\='
+reads that property to fix up \\=`ert-find-test-other-window\\='
+jumps for generated test names, which the default literal search
+cannot find in the source.
 
 Standard example.  The scenario: an old file already exists on
 disk; the user approves an overwrite prompt; afterwards the file
@@ -361,9 +376,9 @@ states an observable outcome in business language (the file now
 contains the new text).
 
   (ert-gwt-deftest
-    (:given (file (ert-gwt--temp-file \"data.txt\"))
-            (old \"old contents\")
-            (new \"new contents\")
+    (:given ((file (ert-gwt--temp-file \"data.txt\"))
+             (old \"old contents\")
+             (new \"new contents\"))
             (with-temp-file file (insert old)))
     (:given (cl-letf (((symbol-function \\='yes-or-no-p)
                        (lambda (_prompt) t)))))
