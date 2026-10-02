@@ -124,29 +124,32 @@ automatically afterwards.
 ### The standard example
 
 ```elisp
-(ert-deftest replacing-a-file ()
-  (ert-gwt
-   :given "a temp file holding an old draft"
-   (let ((path (ert-gwt--temp-file "old draft\n"))
+(ert-gwt-deftest replacing-a-file ()
+  :given "a temp file holding an old draft"
+  (let* ((path (ert-gwt--temp-file))
+         (old-content "old draft\n")
          (new-content "polished draft\n"))
-     (cl-letf (((symbol-function 'read-string)
-                (lambda (&rest _) new-content)))
-       :given "the editor asks for replacement text"
-       :when "I replace the file's contents"
-       (ert-gwt--replace-contents path)
-       :then "the file contains the new draft"
-       (should (equal (ert-gwt--read path) new-content))
-       :then "the old draft is gone"
-       (should-not (equal (ert-gwt--read path) "old draft\n"))))))
+    (with-temp-file path
+      (insert old-content)))
+  :given "the editor asks for confirmation before replacing"
+  (cl-letf (((symbol-function 'yes-or-no-p)
+             (lambda (&rest _) t))))
+  :when "I replace the file's contents"
+  (ert-gwt--replace-contents path new-content)
+  :then "the file contains the new draft"
+  (should (equal (ert-gwt--read path) new-content))
+  :cleanup
+  (delete-file path))
 ```
 
 Note what the example does and does not do. The stub of the collaborator's
-response (`cl-letf` on `read-string`) lives inside the first `:given`, which is
-legitimate because each `:given` segment expands to a `let` wrapping every
-later given, the `:when`, and all `:then`s — so the stub is simply part of the
-given world, and GWT never needs a mock concept of its own. The `:when` is
-exactly one user action, and each `:then` states an observable outcome in the
-user's language, so the test reads the way the user experiences it.
+response (`cl-letf` on `yes-or-no-p`) lives inside the second `:given`, which is
+legitimate because each `:given` segment wraps every later clause — so the stub
+is simply part of the given world, and GWT never needs a mock concept of its
+own. The `:when` is exactly one user action, and the `:then` states an
+observable outcome in the user's language, so the test reads the way the user
+experiences it. The `:cleanup` clause deletes the temp file regardless of the
+test's outcome.
 
 ## Design principles
 

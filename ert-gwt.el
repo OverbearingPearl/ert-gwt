@@ -47,8 +47,8 @@
 ;;     (ert-gwt-deftest
 ;;       (:given ((file (ert-gwt--temp-file "data.txt"))
 ;;                (old "old contents")
-;;                (new "new contents")
-;;                (with-temp-file file (insert old))))
+;;                (new "new contents"))
+;;               (with-temp-file file (insert old)))
 ;;       (:given (cl-letf (((symbol-function (function yes-or-no-p)
 ;;                          (lambda (_prompt) t)))))
 ;;       (:when  (with-temp-file file (insert new)))
