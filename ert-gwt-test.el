@@ -323,8 +323,8 @@ interactive use open the `ert' browser for the prefix
     (dolist (file lisp-files) (load-file file))
     (dolist (file test-files) (load-file file))
     (if noninteractive
-        (ert-run-tests-batch-and-exit "test-")
-      (ert "test-"))))
+        (ert-run-tests-batch-and-exit "ert-gwt-")
+      (ert "ert-gwt-"))))
 
 (provide 'ert-gwt-test)
 
