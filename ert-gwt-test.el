@@ -89,14 +89,27 @@ lookup for the main module's directory, then to
       (should (string-match-p ":describe" (error-message-string err))))))
 
 (ert-deftest ert-gwt-test--name-anonymous-counter ()
-  (let ((ert-gwt--counter 0)
+  (let ((ert-gwt--seen (make-hash-table :test 'equal))
         (load-file-name nil))
     (with-temp-buffer
-      (ert-info ("Anonymous :name with no clauses and no load-file-name yields fallback prefix, expected test-gwt-1 then test-gwt-2")
-        (let ((first (ert-gwt--name))
-              (second (ert-gwt--name)))
-          (should (eq first 'test-gwt-1))
-          (should (eq second 'test-gwt-2)))))))
+      (ert-info ("Anonymous :name with no clauses and no load-file-name derives content-hash base names; repeated identical clauses share the same base, distinct clauses differ")
+        (let* ((first (ert-gwt--name '("alpha" "beta")))
+               (second (ert-gwt--name '("alpha" "beta")))
+               (third (ert-gwt--name '("gamma" "delta"))))
+          (ert-info ("Second call with identical clauses gets a -2 suffixed name instead of the first name")
+            (should-not (equal second first)))
+          (ert-info ("Distinct clauses yield a different base name")
+            (should-not (equal third first)))
+          (ert-info ("Repeated identical clauses get a -2 suffix instead of a plain base name")
+            (should (string-match-p (concat "\\`"
+                                            (regexp-quote (symbol-name first))
+                                            "-2\\'")
+                                    (symbol-name second))))
+          (ert-info ("All generated names match test-gwt-<hash8> or test-gwt-<hash8>-N")
+            (dolist (name (list first second third))
+              (should (string-match-p
+                       "\\`test-gwt-[0-9a-f]\\{8\\}\\(?:-[1-9][0-9]*\\)?\\'"
+                       (symbol-name name))))))))))
 
 (ert-deftest ert-gwt-test--parse-cleanup-and-bare-given ()
   (ert-info ("Parse collects :cleanups as ((foo) (bar) (baz)) in order")

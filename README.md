@@ -30,8 +30,10 @@ clauses.
 
 ## Features
 
-- **Anonymous by default.** No name required. The macro generates
-  `test-gwt-N`.
+- **Content-derived names.** Test names are derived from content: the file
+  prefix plus the first 8 hex digits of the SHA-1 of the clause bodies.
+  Blocks with identical content in the same file get `-2`, `-3` suffixes.
+  Editing other tests never makes this test's name drift.
 - **GWT as structure, not strings.** `:given`, `:when`, `:then` are
   syntactic clauses, not parsed text. No `.feature` files, no regex step
   matching.
@@ -72,12 +74,14 @@ Put `ert-gwt.el` on your `load-path`:
 Expands to:
 
 ```elisp
-(ert-deftest test-gwt-1 ()
+(ert-deftest scalpel-demo-1a2b3c4d ()
   "Anonymous GWT-style test defined by `ert-gwt-deftest'."
   (let ((user (make-user "alice" "secret")))
     (login user)
     (should (login-redirects-to-home-p user))))
 ```
+
+The test name is derived from a hash of the test's content, and remains stable regardless of other tests being added or removed.
 
 ### Multiple `:then` clauses
 

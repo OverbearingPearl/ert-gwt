@@ -72,6 +72,12 @@
 (defvar ert-gwt--counter 0
   "Counter used to generate unique names for anonymous tests.")
 
+(defvar ert-gwt--seen (make-hash-table :test 'equal)
+  "Hash of content-hash names already used in this session.
+Keys are content hashes, values are how many times each has been
+used, so two test blocks with identical content in the same file
+get distinct names.")
+
 (defvar ert-gwt--base-buffers nil
   "Buffers present when a GWT test body started.
 
@@ -288,30 +294,62 @@ read e.g. \"✓ THEN: ...\"."
           (setq ert-gwt--then-notes
                 (cons ,fail-note ert-gwt--then-notes))))))))
 
-(defun ert-gwt--name ()
-  "Return the next ERT test name `<prefix>-N'.
+(defun ert-gwt--name (clauses)
+  "Return an interned ERT test name for CLAUSES.
 
-The prefix is derived from the file being loaded at macro-expansion
-time: `load-file-name' is bound while the file defining the test is
-being loaded, so `file-name-base' of e.g. \"mm-test.el\" yields the
-prefix \"mm-test\".  Fall back to the prefix \"test-gwt\" when
-`load-file-name' is nil (e.g. tests running after load, interactive
-eval), which yields names like \"test-gwt-1\".
+The prefix comes from `load-file-name' (bound while the file
+defining the test is being loaded): `file-name-base' of e.g.
+\"mm-test.el\" yields \"mm-test\".  Fall back to \"test-gwt\"
+when `load-file-name' is nil (interactive eval, tests already
+loaded).
 
-The trailing counter keeps names unique, so `ert \"XXX-\"' prefix
-filtering keeps working."
-  (intern
-   (format "%s-%d"
+Hashing and duplicate-name bookkeeping are delegated to
+`ert-gwt-name-from-clauses', which uses `ert-gwt--seen' as its
+counter table; this function only interns the returned string."
+  (intern (ert-gwt-name-from-clauses
            (if load-file-name
                (file-name-base load-file-name)
              "test-gwt")
-           (cl-incf ert-gwt--counter))))
+           clauses
+           ert-gwt--seen)))
+
+(defun ert-gwt-name-from-clauses (prefix clauses taken)
+  "Return a unique GWT test name for CLAUSES under PREFIX.
+
+This is the single source of truth for the GWT naming rule, shared by
+the macro and external tools (e.g. Scalpel locators).
+
+The base name is \"PREFIX-HASH8\", where HASH8 is the first 8 hex
+characters of (secure-hash \\='sha1 (format \"%S\" clauses)).  If the
+base name has not been used yet (absent from TAKEN), return it and
+record a count of 1.  On subsequent calls return \"PREFIX-HASH8-N\"
+with N starting at 2, incrementing the stored count.
+
+TAKEN is a hash table keyed by base-name strings with integer usage
+counts; it is read and updated here.  No other global state (in
+particular `ert-gwt--seen') is read or modified."
+  (let* ((hash (substring (secure-hash 'sha1 (format "%S" clauses)) 0 8))
+         (base (format "%s-%s" prefix hash))
+         (count (gethash base taken 0)))
+    (if (zerop count)
+        (progn
+          (puthash base 1 taken)
+          base)
+      (puthash base (1+ count) taken)
+      (format "%s-%d" base (1+ count)))))
 
 (defmacro ert-gwt-deftest (&rest clauses)
   "Define an anonymous GWT-style ERT test from CLAUSES.
 
-The macro generates a unique anonymous test name of the form
-\\=`<file-prefix>-N\\='; nothing from the clauses appears in the name.
+The macro generates a unique anonymous test name using the
+content-hash naming rule: the name is of the form
+\\=`<file-prefix>-<hash8>\\=', where <hash8> is a content hash of the
+clause list.  When identical clause bodies repeat in the same
+file, a numeric suffix \\=`-2\\=', \\=`-3\\=', ... is appended to keep the
+names distinct.  Nothing else from the clauses appears in the
+name.  The function \\=`ert-gwt-name-from-clauses\\=' is the single
+source of truth for this naming rule and is reusable by external
+tools such as Scalpel locators.
 
 Each element of CLAUSES is one of:
 
@@ -397,7 +435,7 @@ observable from outside the code under test does not belong in
 \\=`:then\\='."
   (declare (indent 0))
   (let* ((parsed (ert-gwt--parse-clauses clauses))
-         (name (ert-gwt--name))
+         (name (ert-gwt--name clauses))
          (givens (plist-get parsed :givens))
          (when-form (plist-get parsed :when))
          (thens (plist-get parsed :thens))
