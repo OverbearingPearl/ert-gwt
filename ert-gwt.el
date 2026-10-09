@@ -133,8 +133,9 @@ collected in order)."
            (error "ert-gwt-deftest: Only one :when clause allowed"))
          (setq when form
                when-p t))
-        (`(:then ,form)
-         (push form thens))
+        (`(:then . ,rest)
+         (dolist (form rest)
+           (push form thens)))
         (`(:cleanup . ,rest)
          (setq cleanups (append cleanups rest nil)))
         (_
