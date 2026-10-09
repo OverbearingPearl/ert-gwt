@@ -28,19 +28,17 @@ symbol names like:
 The macro generates a unique ERT test name for you. You focus on the three
 clauses.
 
-## Features
+## 特性
 
-- **Content-derived names.** Test names are derived from content: the file
-  prefix plus the first 8 hex digits of the SHA-1 of the clause bodies.
-  Blocks with identical content in the same file get `-2`, `-3` suffixes.
-  Editing other tests never makes this test's name drift.
-- **GWT as structure, not strings.** `:given`, `:when`, `:then` are
-  syntactic clauses, not parsed text. No `.feature` files, no regex step
-  matching.
-- **Built on ERT.** Uses `ert-deftest` and `should`. Your existing ERT
-  filters, batch runners, and CI integration keep working.
-- **Zero dependencies.** No Buttercup, no Ecukes, no Cask. One `defmacro`
-  plus a counter.
+- **基于内容命名。** 测试名称由内容派生：文件前缀加上子句主体 SHA-1 哈希的前 8 位十六进制数字。
+  在同一文件中具有相同内容的块会获得 `-2`、`-3` 后缀。
+  编辑其他测试绝不会导致此测试的名称漂移。
+- **GWT 作为结构，而非字符串。** `:given`、`:when`、`:then` 是
+  语法子句，而非解析的文本。无需 `.feature` 文件，也无需正则步骤匹配。
+- **基于 ERT。** 使用 `ert-deftest` 和 `should`。您现有的 ERT
+  过滤器、批处理运行器和 CI 集成可以继续工作。
+- **零依赖。** 无需 Buttercup、Ecukes 或 Cask。一个 `defmacro`
+  加上一个用于名称簿记的哈希表。
 
 ## Installation
 
@@ -166,8 +164,8 @@ test's outcome.
    `ert-gwt` does not replace it; it extends its syntax.
 
 3. **No framework, no dependencies.**
-   One macro, one counter, one `provide`. If you can `require` something,
-   you can use `ert-gwt`.
+   One macro, one hash table, one `provide`. If you can `require`
+   something, you can use `ert-gwt`.
 
 ## Comparison
 

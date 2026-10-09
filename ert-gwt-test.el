@@ -135,7 +135,6 @@ lookup for the main module's directory, then to
         (defvar ert-gwt-test--cleanup-ran)
         (let ((ert-gwt-test--cleanup-ran nil)
               (load-file-name nil)
-              (ert-gwt--counter 0)
               expected-name)
           (ert-info ("Evaluating ert-gwt-deftest registers the anonymous test")
             (setq expected-name
@@ -303,11 +302,10 @@ This command is interactive so `M-x ert-gwt-test-run' works from
 any directory; the interactivity exception applies to the test
 entry runner like keybindings do.
 
-Clear prior ERT tests, unload the package features, reset the
-module variables that must be re-defined, reload the main module
-and any lisp/ submodules, then load every -test.el file.  In
-batch mode exit with the test result as the process status; in
-interactive use open the `ert' browser for the prefix
+Clear prior ERT tests, unload the package features, reload the
+main module and any lisp/ submodules, then load every -test.el
+file.  In batch mode exit with the test result as the process
+status; in interactive use open the `ert' browser for the prefix
 \"test-\"."
   (interactive)
   (let* ((root (ert-gwt-test--package-root))
@@ -327,11 +325,6 @@ interactive use open the `ert' browser for the prefix
     (dolist (feature (ert-gwt-test--module-features))
       (when (featurep feature)
         (unload-feature feature t)))
-    ;; Minimal reset: only variables the reload re-defvars and that
-    ;; must be reset (here the name counter).  User configuration is
-    ;; not touched.
-    (when (boundp 'ert-gwt--counter)
-      (makunbound 'ert-gwt--counter))
     (load-file main)
     (dolist (file lisp-files) (load-file file))
     (dolist (file test-files) (load-file file))

@@ -69,9 +69,6 @@
 (require 'cl-lib)
 (require 'ert)
 
-(defvar ert-gwt--counter 0
-  "Counter used to generate unique names for anonymous tests.")
-
 (defvar ert-gwt--seen (make-hash-table :test 'equal)
   "Hash of content-hash names already used in this session.
 Keys are content hashes, values are how many times each has been
@@ -305,8 +302,9 @@ when `load-file-name' is nil (interactive eval, tests already
 loaded).
 
 Hashing and duplicate-name bookkeeping are delegated to
-`ert-gwt-name-from-clauses', which uses `ert-gwt--seen' as its
-counter table; this function only interns the returned string."
+`ert-gwt-name-from-clauses', which uses `ert-gwt--seen' as the
+hash table holding per-name usage counts; this function only
+interns the returned string."
   (intern (ert-gwt-name-from-clauses
            (if load-file-name
                (file-name-base load-file-name)
