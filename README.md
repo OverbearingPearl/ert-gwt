@@ -63,23 +63,68 @@ Put `ert-gwt.el` on your `load-path`:
 ### Basic
 
 ```elisp
+(require 'ert-gwt)
+
 (ert-gwt-deftest
   (:given ((user (make-user "alice" "secret"))))
-  (:when  (login user))
-  (:then  (login-redirects-to-home-p user)))
+  (:when (login user))
+  (:then (login-redirects-to-home-p user)))
 ```
 
-Expands to:
+The macroexpansion of the above example is:
 
 ```elisp
-(ert-deftest scalpel-demo-1a2b3c4d ()
-  "Anonymous GWT-style test defined by `ert-gwt-deftest'."
-  (let ((user (make-user "alice" "secret")))
-    (login user)
-    (should (login-redirects-to-home-p user))))
+(ert-deftest ert-gwt-3f2a9c1d ()
+  (let ((ert-gwt--pre-buffers (buffer-list)))
+    (unwind-protect
+        (progn
+          (ert-info ((ert-gwt--clause-text "GIVEN" '((user (make-user "alice" "secret")))))
+            (let* ((user (make-user "alice" "secret")))
+              (let ((ert-gwt--then-notes nil)
+                    (ert-gwt--aborted nil)
+                    (ert-gwt--first-error nil))
+                (ert-info ((ert-gwt--clause-text "WHEN" '(login user)))
+                  (condition-case ert-gwt--err
+                      (login user)
+                    (error
+                     (setq ert-gwt--aborted t)
+                     (unless ert-gwt--first-error
+                       (setq ert-gwt--first-error ert-gwt--err)))))
+                (ert-info ((ert-gwt--clause-text "THEN" '(login-redirects-to-home-p user)))
+                  (cond
+                   (ert-gwt--aborted
+                    (setq ert-gwt--then-notes
+                          (cons "− THEN: (login-redirects-to-home-p user)"
+                                ert-gwt--then-notes)))
+                   (t
+                    (condition-case ert-gwt--err
+                        (progn
+                          (ert-info ((ert-gwt--clause-text "THEN" '(login-redirects-to-home-p user)))
+                            (should (login-redirects-to-home-p user)))
+                          (setq ert-gwt--then-notes
+                                (cons "✓ THEN: (login-redirects-to-home-p user)"
+                                      ert-gwt--then-notes)))
+                      (error
+                       (unless ert-gwt--first-error
+                         (setq ert-gwt--first-error ert-gwt--err))
+                       (setq ert-gwt--then-notes
+                             (cons "✗ THEN: (login-redirects-to-home-p user)"
+                                   ert-gwt--then-notes)))))))
+                (when ert-gwt--first-error
+                  (ert-info ((ert-gwt--clause-text "WHEN" '(login user)))
+                    (ert-info ((concat
+                                (ert-gwt--clause-text "GIVEN" '((user (make-user "alice" "secret"))))
+                                "\n"
+                                (mapconcat #'identity (nreverse ert-gwt--then-notes) "\n")))
+                      (signal (car ert-gwt--first-error)
+                              (cdr ert-gwt--first-error)))))))))
+      (ert-gwt--cleanup ert-gwt--pre-buffers))))
 ```
 
-The test name is derived from a hash of the test's content, and remains stable regardless of other tests being added or removed.
+Note: ERT's internal `should` machinery is abbreviated here for brevity; in the real expansion each clause body retains the full `should` forms the user wrote.
+
+The test name is derived from a hash of the test's content and remains stable regardless of other tests being added or removed.
+
 
 ### Multiple `:then` clauses
 
@@ -126,32 +171,32 @@ automatically afterwards.
 ### The standard example
 
 ```elisp
-(ert-gwt-deftest replacing-a-file ()
-  :given "a temp file holding an old draft"
-  (let* ((path (ert-gwt--temp-file))
-         (old-content "old draft\n")
-         (new-content "polished draft\n"))
-    (with-temp-file path
-      (insert old-content)))
-  :given "the editor asks for confirmation before replacing"
-  (cl-letf (((symbol-function 'yes-or-no-p)
-             (lambda (&rest _) t))))
-  :when "I replace the file's contents"
-  (ert-gwt--replace-contents path new-content)
-  :then "the file contains the new draft"
-  (should (equal (ert-gwt--read path) new-content))
-  :cleanup
-  (delete-file path))
+(ert-gwt-deftest
+  (:given ((file (ert-gwt--temp-file "data.txt"))
+           (old "old contents")
+           (new "new contents"))
+          (with-temp-file file (insert old)))
+  (:given (cl-letf (((symbol-function 'yes-or-no-p)
+                     (lambda (_prompt) t)))))
+  (:when (with-temp-file file (insert new)))
+  (:then (should (equal "new contents"
+                        (with-temp-buffer
+                          (insert-file-contents file)
+                          (buffer-string)))))
+  (:cleanup (delete-file file)))
 ```
 
-Note what the example does and does not do. The stub of the collaborator's
-response (`cl-letf` on `yes-or-no-p`) lives inside the second `:given`, which is
-legitimate because each `:given` segment wraps every later clause — so the stub
-is simply part of the given world, and GWT never needs a mock concept of its
-own. The `:when` is exactly one user action, and the `:then` states an
-observable outcome in the user's language, so the test reads the way the user
-experiences it. The `:cleanup` clause deletes the temp file regardless of the
-test's outcome.
+Note what the example does and does not do. Everything that sets up
+the world — the temp file (made with `ert-gwt--temp-file` so it is
+tracked), its old and new contents, and the stub answering "y" —
+belongs in `:given`. A stub is written as a given too: a `cl-letf`
+rebinding placed inside `:given`, which works because each `:given`
+segment expands to a `let` that wraps all later givens, the `:when`,
+every `:then`, and the `:cleanup` forms, so the stub is simply part of
+the given world and GWT never needs a mock concept of its own. The
+`:when` is exactly one user action, and each `:then` states an
+observable outcome in business language. The `:cleanup` clause deletes
+the temp file regardless of the test's outcome.
 
 ## Design principles
 

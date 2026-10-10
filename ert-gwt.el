@@ -173,7 +173,8 @@ expansion; `ert-gwt--clause-text' is reused to render every line."
   (let ((given-lines
          (mapcar (lambda (segment)
                    (ert-gwt--clause-text "GIVEN" segment))
-                 GIVENS)))
+                 GIVENS))
+        (when-text (ert-gwt--clause-text "WHEN" WHEN-FORM)))
     `(ert-info (,(mapconcat #'identity given-lines "\n"))
        (let* (,@(apply #'append (mapcar #'car GIVENS)))
          ,@(apply #'append (mapcar #'cdr GIVENS))
@@ -182,7 +183,7 @@ expansion; `ert-gwt--clause-text' is reused to render every line."
                (ert-gwt--first-error nil))
            (unwind-protect
                (progn
-                 (ert-info (,(ert-gwt--clause-text "WHEN" ',WHEN-FORM))
+                 (ert-info (,when-text)
                    (condition-case ert-gwt--err
                        (progn ,WHEN-FORM)
                      (error
@@ -190,7 +191,7 @@ expansion; `ert-gwt--clause-text' is reused to render every line."
                       (setq ert-gwt--first-error ert-gwt--err))))
                  ,@(mapcar #'ert-gwt--expand-then THENS)
                  (when ert-gwt--first-error
-                   (ert-info ((ert-gwt--clause-text "WHEN" ',WHEN-FORM))
+                   (ert-info (,when-text)
                      (ert-info ((mapconcat #'identity
                                            (nreverse ert-gwt--then-notes)
                                            "\n"))
