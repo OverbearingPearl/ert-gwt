@@ -13,7 +13,7 @@
 
 ;; Bootstrap `load-path' so loading this entry file from any working
 ;; directory can find the package root.
-;; Bootstrap `load-path' ... (前次编辑后函数定义紧贴注释块, 现已插入空行)
+;; Bootstrap `load-path' ...
 
 (defun ert-gwt-test--package-root ()
   "Return the root directory of the ert-gwt package.
