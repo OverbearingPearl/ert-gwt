@@ -345,6 +345,30 @@ defining-anchor property is missing entirely."
       (when (buffer-live-p buf)
         (kill-buffer buf)))))
 
+(ert-deftest ert-gwt-test--name-and-cleanup-branches ()
+  "Cover uncovered branches of `ert-gwt--name', `ert-gwt-name-from-clauses' and `ert-gwt--cleanup'."
+  (ert-info ("ert-gwt--name: load-file-name nil falls back to the \"test-gwt\" prefix")
+    (let (load-file-name)
+      (should (string-prefix-p "test-gwt"
+                               (symbol-name (ert-gwt--name '((:when t))))))))
+  (ert-info ("ert-gwt-name-from-clauses: duplicate clause name gets a numeric suffix")
+    (let ((taken (make-hash-table :test #'equal))
+          (clauses '((:when t))))
+      (should (string-match-p "\\`dup-[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]\\'"
+                              (ert-gwt-name-from-clauses "dup" clauses taken)))
+      (should (string-match-p "\\`dup-[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]-2\\'"
+                              (ert-gwt-name-from-clauses "dup" clauses taken)))))
+  (ert-info ("ert-gwt--cleanup: deletes a tracked directory; buffer-kill branch skipped by passing the full buffer-list as pre-buffers")
+    (let* ((dir (make-temp-file "ert-gwt-test-dir-" t))
+           (ert-gwt--tracked-files (list dir)))
+      (unwind-protect
+          (progn
+            (should (file-directory-p dir))
+            (ert-gwt--cleanup (buffer-list))
+            (should-not (file-exists-p dir)))
+        (when (file-exists-p dir)
+          (delete-directory dir t))))))
+
 ;;; End-to-end macro behavior
 
 (ert-gwt-deftest
