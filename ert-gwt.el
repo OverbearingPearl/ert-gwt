@@ -22,8 +22,8 @@
 ;;       (:when  (login user))
 ;;       (:then  (login-redirects-to-home-p user)))
 ;;
-;; The macro generates a unique ERT test name: the next free
-;; `test-gwt-N' name.
+;; The macro generates a unique ERT test name: a unique content-hash name <file-prefix>-<hash8> (SHA1 of
+;; the clause list; repeated identical clauses get a -2, -3, ... suffix).
 ;;
 ;; `:given' accepts `let'-style bindings followed by arbitrary setup
 ;; forms.  `:when' holds the action under test.  Each `:then' form is
@@ -62,7 +62,7 @@
 ;; observes only the result.
 ;;
 ;; There are no dependencies beyond ERT itself.  One macro, one
-;; counter, one `provide'.
+;; content-hash namer, one `provide'.
 
 ;;; Code:
 
