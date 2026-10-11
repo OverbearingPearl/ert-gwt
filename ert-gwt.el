@@ -49,7 +49,7 @@
 ;;                (old "old contents")
 ;;                (new "new contents"))
 ;;               (with-temp-file file (insert old)))
-;;       (:given (cl-letf (((symbol-function (function yes-or-no-p)
+;;       (:given (cl-letf (((symbol-function 'yes-or-no-p)
 ;;                          (lambda (_prompt) t)))))
 ;;       (:when  (with-temp-file file (insert new)))
 ;;       (:then  (string= "new contents"
