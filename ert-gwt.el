@@ -89,14 +89,34 @@ jumped to.  When the default literal search failed and left point
 at `point-min' (generated test names do not appear in the source
 text), look up the defining file recorded in the
 `ert-gwt--defining-file' symbol property of the test name and jump
-to it.  The property is written at macro expansion time."
+to it.  The property is written at macro expansion time.
+
+After opening the defining file, read the `ert-gwt--defining-anchor'
+property from the test name symbol.  If the anchor exists, search
+forward from `point-min' for the anchor as literal text; on a hit,
+`goto-char' the beginning of the first match (duplicates resolve to
+the first match).  If the anchor is missing or the literal search
+fails, keep the degraded jump-to-`point-min' behavior and emit an
+explicit `message' about the fallback (never silent)."
   (let ((result (funcall orig-fn test-name-string)))
     (when (= (point) (point-min))
-      (let ((file (get (intern-soft test-name-string)
-                       'ert-gwt--defining-file)))
+      (let* ((sym (intern-soft test-name-string))
+             (file (and sym (get sym 'ert-gwt--defining-file)))
+             (anchor (and sym (get sym 'ert-gwt--defining-anchor))))
         (when (and file (file-exists-p file))
           (find-file-other-window file)
-          (goto-char (point-min)))))
+          (goto-char (point-min))
+          (cond
+           ((not anchor)
+            (message "ert-gwt: no defining anchor for %s; jumping to %s at point-min (degraded)"
+                     test-name-string file))
+           ((save-excursion
+              (goto-char (point-min))
+              (search-forward anchor nil t))
+            (goto-char (match-beginning 0)))
+           (t
+            (message "ert-gwt: anchor %S for %s not found in %s; jumping to point-min (degraded)"
+                     anchor test-name-string file))))))
     result))
 
 (advice-add 'ert-find-test-other-window :around #'ert-gwt--advice-find-test-other-window)
@@ -313,6 +333,22 @@ interns the returned string."
            clauses
            ert-gwt--seen)))
 
+(defun ert-gwt--defining-anchor (clauses)
+  "Return a literal searchable anchor for an `ert-gwt-deftest' form.
+
+Return the `prin1-to-string' serialization of CLAUSES, which is the
+entire `ert-gwt-deftest' call form as written in the source file.
+Callers use this text to jump directly to the defining location by
+searching for it literally in the file.
+
+Return nil if serialization fails for any reason (for example when
+CLAUSES contains an object that cannot be printed).  On nil, callers
+must degrade gracefully by falling back to their existing behavior of
+jumping to the beginning of the file."
+  (condition-case nil
+      (prin1-to-string clauses)
+    (error nil)))
+
 (defun ert-gwt-name-from-clauses (prefix clauses taken)
   "Return a unique GWT test name for CLAUSES under PREFIX.
 
@@ -441,9 +477,12 @@ observable from outside the code under test does not belong in
          (thens (plist-get parsed :thens))
          (cleanups (plist-get parsed :cleanups))
          (defining-file (and load-file-name
-                             (file-truename load-file-name))))
+                             (file-truename load-file-name)))
+         (anchor (ert-gwt--defining-anchor clauses)))
     (when defining-file
       (put name 'ert-gwt--defining-file defining-file))
+    (when anchor
+      (put name 'ert-gwt--defining-anchor anchor))
     `(ert-deftest ,name ()
        "Anonymous GWT-style test defined by `ert-gwt-deftest'."
        (let ((ert-gwt--pre-buffers (buffer-list)))

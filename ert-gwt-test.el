@@ -213,6 +213,117 @@ the `ert-gwt--first-error' summary starting with `when'."
       (when (and path (file-exists-p path))
         (delete-file path)))))
 
+(ert-deftest ert-gwt-test--defining-anchor-serialization ()
+  (ert-info ("Normal clause list yields non-nil serialized text containing each literal")
+    (let ((clauses '("should" "return" "a cons cell")))
+      (let ((result (ert-gwt--defining-anchor clauses)))
+        (should result)
+        (should (stringp result))
+        (dolist (clause clauses)
+          (should
+           (string-match-p
+            (regexp-quote clause)
+            result))))))
+  (let ((buf (generate-new-buffer " *ert-gwt-anchor-test*")))
+    (unwind-protect
+        (ert-info ("Clause list containing a buffer object still yields a string containing the buffer name; the downgrade path only covers real print errors, not unreadable-but-printable objects")
+          (let ((result (ert-gwt--defining-anchor
+                         (list (buffer-name buf) buf))))
+            (should result)
+            (should (stringp result))
+            (should
+             (string-match-p
+              (regexp-quote (buffer-name buf))
+              result))))
+      (kill-buffer buf))))
+
+(ert-deftest ert-gwt-test--defining-anchor-fallback-lookup ()
+  "Locate the symbol via its defining-anchor property.
+The advice `ert-gwt--advice-find-test-other-window' must locate
+the symbol via its defining-anchor property (literal string
+search, not regexp), land point at the beginning of the matched
+anchor text, degrade to point-min with a loud message when the
+anchor text is absent, and degrade loudly when the
+defining-anchor property is missing entirely."
+  (let* ((temp-file (make-temp-file "gwt-anchor-test-" nil ".el"))
+         (subject 'gwt-test--anchor-subject)
+         (anchor-line ";; anchor: (gwt-test--anchor-subject)")
+         (missing-anchor ";; anchor: (gwt-test--no-such-subject)")
+         (body (concat ";; preamble line\n"
+                       anchor-line "\n"
+                       "(defun gwt-test--anchor-subject () nil)\n"))
+         (no-op (lambda (&rest _args) (goto-char (point-min)))))
+    (unwind-protect
+        (progn
+          (with-temp-file temp-file
+            (insert body))
+          (put subject 'ert-gwt--defining-file temp-file)
+          ;; Case 1: anchor text present -> point lands at match-beginning
+          ;; in the buffer the advice opened for temp-file.
+          (put subject 'ert-gwt--defining-anchor anchor-line)
+          (ert-info ("Anchor lookup must land point at the start of the matched anchor symbol in the opened file buffer")
+            (goto-char (point-min))
+            (funcall #'ert-gwt--advice-find-test-other-window no-op subject)
+            (should (equal (buffer-file-name) temp-file))
+            (should (looking-at
+                     (regexp-quote anchor-line)))
+            (should (equal
+                     (line-number-at-pos (point))
+                     2)))
+          ;; Case 2: anchor text absent -> degrade to point-min, loud message.
+          (put subject 'ert-gwt--defining-anchor missing-anchor)
+          (let ((log ""))
+            (cl-letf (((symbol-function 'message)
+                       (lambda (fmt &rest args)
+                         (setq log
+                               (concat log
+                                       (apply #'format (or fmt "nil") args)
+                                       "\n"))
+                         nil)))
+              (ert-info ("Anchor mismatch must degrade to point-min and log, not fail silently")
+                (goto-char (point-min))
+                (funcall #'ert-gwt--advice-find-test-other-window no-op subject)
+                (should (equal (buffer-file-name) temp-file))
+                (should (= (point) (point-min)))
+                (should (> (length log) 0))
+                (should (string-match-p
+                         "anchor"
+                         log)))))
+          ;; Case 3: defining-anchor property missing -> degrade loudly.
+          (put subject 'ert-gwt--defining-anchor nil)
+          (let ((log ""))
+            (cl-letf (((symbol-function 'message)
+                       (lambda (fmt &rest args)
+                         (setq log
+                               (concat log
+                                       (apply #'format (or fmt "nil") args)
+                                       "\n"))
+                         nil)))
+              (ert-info ("Missing defining-anchor property must degrade to point-min and log the no-anchor message")
+                (goto-char (point-min))
+                (funcall #'ert-gwt--advice-find-test-other-window no-op subject)
+                (should (equal (buffer-file-name) temp-file))
+                (should (= (point) (point-min)))
+                (should (> (length log) 0))
+                (should (string-match-p
+                         "no defining anchor"
+                         log)))))
+          ;; Kill any buffer the advice opened via find-file-other-window.
+          (dolist (buf (buffer-list))
+            (when (and (buffer-live-p buf)
+                       (equal (buffer-file-name buf) temp-file))
+              (kill-buffer buf))))
+      (dolist (buf (buffer-list))
+        (when (and (buffer-live-p buf)
+                   (equal (buffer-file-name buf) temp-file))
+          (kill-buffer buf)))
+      ;; Cleanup-path degradation point: deleting the temp file may
+      ;; fail (e.g. file already gone or permissions); swallow the
+      ;; error explicitly so cleanup never masks the test result.
+      (condition-case _err
+          (delete-file temp-file)
+        (error nil)))))
+
 (ert-deftest ert-gwt-test--cleanup ()
   "Cleanup kills tracked buffers and files, resets tracker."
   (let* ((pre-buffers (buffer-list))
