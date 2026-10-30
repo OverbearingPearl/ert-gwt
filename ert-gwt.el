@@ -121,14 +121,31 @@ explicit `message' about the fallback (never silent)."
     result))
 
 (defun ert-gwt-unload-function ()
-  "Remove the around advice this package installed on `ert-find-test-other-window'.
+  "Disable `ert-gwt-defining-file-jump-mode' before unload.
 Called automatically by `unload-feature' when unloading this
-package.  Return nil so the normal unloading flow continues."
-  (advice-remove 'ert-find-test-other-window
-                 #'ert-gwt--advice-find-test-other-window)
+package.  Disabling the mode removes the around advice this
+package installed on `ert-find-test-other-window'.  Return nil so
+the normal unloading flow continues."
+  (ert-gwt-defining-file-jump-mode -1)
   nil)
 
-(advice-add 'ert-find-test-other-window :around #'ert-gwt--advice-find-test-other-window)
+;;;###autoload
+(define-minor-mode ert-gwt-defining-file-jump-mode
+  "Improve `ert-find-test-other-window' for `ert-gwt-deftest' tests.
+
+When enabled, `ert-find-test-other-window' is advised so that a
+failed literal search falls back to the defining file recorded at
+macro expansion time.  The mode is enabled on load;
+`ert-gwt-unload-function' turns it off on unload."
+  :global t
+  :group 'ert-gwt
+  (if ert-gwt-defining-file-jump-mode
+      (advice-add 'ert-find-test-other-window :around
+                  #'ert-gwt--advice-find-test-other-window)
+    (advice-remove 'ert-find-test-other-window
+                   #'ert-gwt--advice-find-test-other-window)))
+
+(ert-gwt-defining-file-jump-mode 1)
 
 (when (and (boundp 'load-file-name) load-file-name)
   (let ((dir (file-name-directory load-file-name)))
@@ -174,6 +191,11 @@ collected in order)."
           :when when
           :thens (nreverse thens)
           :cleanups cleanups)))
+
+(defgroup ert-gwt nil
+  "Given-When-Then extensions for ERT."
+  :prefix "ert-gwt-"
+  :group 'ert)
 
 (defun ert-gwt--expand-givens (GIVENS WHEN-FORM THENS CLEANUPS)
   "Expand the GIVEN segments in GIVENS into a single binding scope.
