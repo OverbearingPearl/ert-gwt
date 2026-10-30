@@ -100,7 +100,7 @@ the first match).  If the anchor is missing or the literal search
 fails, keep the degraded jump-to-`point-min' behavior and emit an
 explicit `message' about the fallback (never silent)."
   (let ((result (funcall orig-fn test-name-string)))
-    (when (= (point) (point-min))
+    (when (bobp)
       (let* ((sym (intern-soft test-name-string))
              (file (and sym (get sym 'ert-gwt--defining-file)))
              (anchor (and sym (get sym 'ert-gwt--defining-anchor))))
@@ -119,6 +119,14 @@ explicit `message' about the fallback (never silent)."
             (message "ert-gwt: anchor %S for %s not found in %s; jumping to point-min (degraded)"
                      anchor test-name-string file))))))
     result))
+
+(defun ert-gwt-unload-function ()
+  "Remove the around advice this package installed on `ert-find-test-other-window'.
+Called automatically by `unload-feature' when unloading this
+package.  Return nil so the normal unloading flow continues."
+  (advice-remove 'ert-find-test-other-window
+                 #'ert-gwt--advice-find-test-other-window)
+  nil)
 
 (advice-add 'ert-find-test-other-window :around #'ert-gwt--advice-find-test-other-window)
 
@@ -289,7 +297,7 @@ executed), and the first error is stored in
 `ert-gwt--first-error' for the caller to re-signal inside a
 summary `ert-info' after all THENs are accounted for.  Nothing is
 re-signalled here.  The status marks appear only in the notes,
-not in the ert-info line.  All note strings are computed at
+not in the `ert-info' line.  All note strings are computed at
 expansion time; nothing is evaluated during expansion.  Notes
 read e.g. \"✓ THEN: ...\"."
   (let ((info-text (ert-gwt--clause-text "THEN" THEN))
