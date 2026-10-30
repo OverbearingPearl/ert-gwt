@@ -22,17 +22,18 @@
 ;;       (:when  (login user))
 ;;       (:then  (login-redirects-to-home-p user)))
 ;;
-;; The macro generates a unique ERT test name: a unique content-hash name <file-prefix>-<hash8> (SHA1 of
-;; the clause list; repeated identical clauses get a -2, -3, ... suffix).
+;; The macro generates a unique ERT test name: a unique content-hash
+;; name <file-prefix>-<hash8> (SHA1 of the clause list; repeated
+;; identical clauses get a -2, -3, ... suffix).
 ;;
 ;; `:given' accepts `let'-style bindings followed by arbitrary setup
 ;; forms.  `:when' holds the action under test.  Each `:then' form is
 ;; wrapped in `should', so plain ERT expectations apply.
 ;;
-;; Clause occurrence rules: `:given' is optional and may repeat (each occurrence is
-;; nested, so later givens see earlier bindings), `:when' is
-;; required and allowed exactly once, `:then' is required and may
-;; repeat, and `:cleanup' is optional and may repeat.
+;; Clause occurrence rules: `:given' is optional and may repeat (each
+;; occurrence is nested, so later givens see earlier bindings),
+;; `:when' is required and allowed exactly once, `:then' is required
+;; and may repeat, and `:cleanup' is optional and may repeat.
 ;;
 ;; Cleanup is automatic: user `:cleanup' forms run first, then
 ;; buffers created during the test are killed and temp files made
