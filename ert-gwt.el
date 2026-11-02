@@ -83,22 +83,11 @@ Buffers created afterwards are killed by the test's `unwind-protect',
 so a test never leaves extra buffers behind.")
 
 (defun ert-gwt--advice-find-test-other-window (orig-fn test-name-string)
-  "Advice around `ert-find-test-other-window'.
-
-Call ORIG-FN; TEST-NAME-STRING is the name of the test being
-jumped to.  When the default literal search failed and left point
-at `point-min' (generated test names do not appear in the source
-text), look up the defining file recorded in the
-`ert-gwt--defining-file' symbol property of the test name and jump
-to it.  The property is written at macro expansion time.
-
-After opening the defining file, read the `ert-gwt--defining-anchor'
-property from the test name symbol.  If the anchor exists, search
-forward from `point-min' for the anchor as literal text; on a hit,
-`goto-char' the beginning of the first match (duplicates resolve to
-the first match).  If the anchor is missing or the literal search
-fails, keep the degraded jump-to-`point-min' behavior and emit an
-explicit `message' about the fallback (never silent)."
+  "Jump to a generated test name via ORIG-FN, with fallback logic.
+Calls ORIG-FN with TEST-NAME-STRING first; if the search fails
+and leaves point at point-min, looks up the defining file and
+anchor text recorded on the test symbol at macro expansion time
+and jumps there, falling back to point-min with a message."
   (let ((result (funcall orig-fn test-name-string)))
     (when (bobp)
       (let* ((sym (intern-soft test-name-string))
@@ -198,29 +187,21 @@ collected in order)."
   :group 'ert)
 
 (defun ert-gwt--expand-givens (GIVENS WHEN-FORM THENS CLEANUPS)
-  "Expand the GIVEN segments in GIVENS into a single binding scope.
-Build a single `let*' binding the bindings of all GIVEN segments,
+  "Expand the GIVEN segments in GIVENS around WHEN-FORM and THENS.
+Generate a single `let*' binding all bindings of every GIVEN segment,
 wrapped in one `ert-info' whose message joins one \"GIVEN: ...\" line
-per segment.  Bindings within a segment see earlier ones, as in
-`let*'.  WHEN-FORM is the WHEN clause form to evaluate, wrapped in its
-own `ert-info' whose message is computed at expansion time by
-`ert-gwt--clause-text'; the body of that `ert-info' is exactly the
-`condition-case' around WHEN-FORM, so WHEN appears as its own unmarked
-Info line on both success and failure.  Expand each of the THENS, a
-list of THEN forms, with `ert-gwt--expand-then', so a failure report
-shows one marked line (✓/✗/−) per clause in a single summary
-`ert-info'.  CLEANUPS is a list of cleanup forms run on unwind, inside
-the scope of every given binding.
-
-The WHEN `ert-info', the THEN expansions, and the first-error summary
-all live in the same `progn' under `unwind-protect', so CLEANUPS run
-on unwind regardless of outcome.  If the WHEN form fails, the error is
-remembered and the first error is re-signalled at the end inside a
-nested pair of `ert-info's: the outer one carries the unmarked WHEN
-line as its message, and the inner one carries the joined,
-chronological summary of one ✓/✗/− line per THEN.  The notes list
-starts empty and all notes are collected with inline `setq' in the
-expansion; `ert-gwt--clause-text' is reused to render every line."
+per segment; bindings within a segment see earlier ones, as in
+`let*'.  The WHEN-FORM is evaluated inside its own `ert-info' and a
+`condition-case' that records a failure instead of propagating it, so
+WHEN appears as its own unmarked Info line on both success and
+failure.  Each form in THENS is expanded with `ert-gwt--expand-then',
+so a failure report shows one marked line (✓/✗/−) per clause in a
+single summary `ert-info'.  The WHEN `ert-info', the THEN expansions,
+and the re-signal of the first error (if any) all live in one `progn'
+under `unwind-protect', so CLEANUPS run on unwind regardless of
+outcome, inside the scope of every given binding.  When the WHEN form
+fails, the error is re-signalled at the end inside nested `ert-info's
+carrying the unmarked WHEN line and the chronological per-THEN summary."
   (let ((given-lines
          (mapcar (lambda (segment)
                    (ert-gwt--clause-text "GIVEN" segment))
@@ -292,17 +273,10 @@ and delete tracked temp files."
 
 (defun ert-gwt--clause-text (label form)
   "Return the % escaped `ert-info' message string for LABEL and FORM.
-`ert-info' splices its MESSAGE argument into the expansion
-unquoted, so the form spliced there must evaluate to a plain
-string.  A string evaluates to itself, and the callers' wrapping
-`(ert-info ,(ert-gwt--clause-text ...))' already supplies the
-necessary parens; returning a quoted list would instead make
-`ert-info' parse the string as the first element and the rest as
-keyword arguments, signaling `Keyword argument ... not one of
-\(:prefix)'.
-The printed form of FORM is % escaped before splicing, because
-any subsequent `format' on the message would otherwise treat %
-as a format specifier.
+`ert-info' splices its MESSAGE argument into the expansion unquoted,
+so what we return must evaluate to a plain string.  The printed form
+of FORM is % escaped before splicing, so that any later `format' on
+the message cannot mistake a literal % for a format specifier.
 Used to echo GWT clause source into failure reports."
   (format "%s: %s"
           label
@@ -311,17 +285,12 @@ Used to echo GWT clause source into failure reports."
 
 (defun ert-gwt--expand-then (THEN)
   "Expand one THEN form, recording a status note for every THEN.
-An unmarked `ert-info' line labeled plainly THEN wraps the
-assertion.  On success a ✓ THEN note is recorded.  On failure a
-✗ THEN note is recorded, the dynamically scoped flag
-`ert-gwt--aborted' is set so later THENs are marked − THEN (not
-executed), and the first error is stored in
-`ert-gwt--first-error' for the caller to re-signal inside a
-summary `ert-info' after all THENs are accounted for.  Nothing is
-re-signalled here.  The status marks appear only in the notes,
-not in the `ert-info' line.  All note strings are computed at
-expansion time; nothing is evaluated during expansion.  Notes
-read e.g. \"✓ THEN: ...\"."
+Each THEN expands to a `cond': if an earlier THEN aborted, a
+\"− THEN\" note is recorded; otherwise the assertion runs inside a
+plain `ert-info'.  Success records a \"✓ THEN\" note; failure
+records a \"✗ THEN\" note and stashes the error for the caller to
+re-signal in a summary `ert-info' after all THENs are accounted
+for.  All note strings are rendered at expansion time."
   (let ((info-text (ert-gwt--clause-text "THEN" THEN))
         (ok-note (ert-gwt--clause-text "✓ THEN" THEN))
         (fail-note (ert-gwt--clause-text "✗ THEN" THEN))
@@ -347,16 +316,10 @@ read e.g. \"✓ THEN: ...\"."
 (defun ert-gwt--name (clauses)
   "Return an interned ERT test name for CLAUSES.
 
-The prefix comes from `load-file-name' (bound while the file
-defining the test is being loaded): `file-name-base' of e.g.
-\"mm-test.el\" yields \"mm-test\".  Fall back to \"test-gwt\"
-when `load-file-name' is nil (interactive eval, tests already
-loaded).
-
-Hashing and duplicate-name bookkeeping are delegated to
-`ert-gwt-name-from-clauses', which uses `ert-gwt--seen' as the
-hash table holding per-name usage counts; this function only
-interns the returned string."
+The name prefix is derived from the defining file's base name,
+falling back to \"test-gwt\" if unavailable.  Hashing and
+duplicate-name handling are delegated to `ert-gwt-name-from-clauses',
+which tracks per-name usage counts in `ert-gwt--seen'."
   (intern (ert-gwt-name-from-clauses
            (if load-file-name
                (file-name-base load-file-name)
@@ -365,17 +328,11 @@ interns the returned string."
            ert-gwt--seen)))
 
 (defun ert-gwt--defining-anchor (clauses)
-  "Return a literal searchable anchor for an `ert-gwt-deftest' form.
-
-Return the `prin1-to-string' serialization of CLAUSES, which is the
-entire `ert-gwt-deftest' call form as written in the source file.
-Callers use this text to jump directly to the defining location by
-searching for it literally in the file.
-
-Return nil if serialization fails for any reason (for example when
-CLAUSES contains an object that cannot be printed).  On nil, callers
-must degrade gracefully by falling back to their existing behavior of
-jumping to the beginning of the file."
+  "Return the `prin1' serialization of CLAUSES.
+The result is used to locate the `ert-gwt-deftest' definition by
+literal search in the source file.  Return nil if serialization
+fails, in which case the caller falls back to jumping to the
+beginning of the file."
   (condition-case nil
       (prin1-to-string clauses)
     (error nil)))
@@ -383,18 +340,13 @@ jumping to the beginning of the file."
 (defun ert-gwt-name-from-clauses (prefix clauses taken)
   "Return a unique GWT test name for CLAUSES under PREFIX.
 
-This is the single source of truth for the GWT naming rule, shared by
-the macro and external tools (e.g. Scalpel locators).
+The name is \"PREFIX-HASH8\", where HASH8 is derived from the
+clauses' content; collisions are resolved by appending -2, -3, etc.
+This function is the single source of truth for the GWT naming rule
+and is shared by the macro and external tools (e.g. Scalpel locators).
 
-The base name is \"PREFIX-HASH8\", where HASH8 is the first 8 hex
-characters of (secure-hash \\='sha1 (format \"%S\" clauses)).  If the
-base name has not been used yet (absent from TAKEN), return it and
-record a count of 1.  On subsequent calls return \"PREFIX-HASH8-N\"
-with N starting at 2, incrementing the stored count.
-
-TAKEN is a hash table keyed by base-name strings with integer usage
-counts; it is read and updated here.  No other global state (in
-particular `ert-gwt--seen') is read or modified."
+TAKEN is a hash table mapping base names to usage counts; it is read
+and updated here, and no other global state is touched."
   (let* ((hash (substring (secure-hash 'sha1 (format "%S" clauses)) 0 8))
          (base (format "%s-%s" prefix hash))
          (count (gethash base taken 0)))
@@ -408,77 +360,41 @@ particular `ert-gwt--seen') is read or modified."
 (defmacro ert-gwt-deftest (&rest clauses)
   "Define an anonymous GWT-style ERT test from CLAUSES.
 
-The macro generates a unique anonymous test name using the
-content-hash naming rule: the name is of the form
-\\=`<file-prefix>-<hash8>\\=', where <hash8> is a content hash of the
-clause list.  When identical clause bodies repeat in the same
-file, a numeric suffix \\=`-2\\=', \\=`-3\\=', ... is appended to keep the
-names distinct.  Nothing else from the clauses appears in the
-name.  The function \\=`ert-gwt-name-from-clauses\\=' is the single
-source of truth for this naming rule and is reusable by external
-tools such as Scalpel locators.
+The test name is generated by `ert-gwt-name-from-clauses' (the single
+source of truth for the naming rule, reusable by external tools such
+as Scalpel locators).  At expansion time the defining file is recorded
+as the symbol property `ert-gwt--defining-file', which
+`ert-gwt--advice-find-test-other-window' reads to fix up
+`ert-find-test-other-window' jumps.
 
 Each element of CLAUSES is one of:
 
-  (:given BINDINGS FORM...)  let-style bindings plus setup forms;
-                             may appear multiple times, each nested
-                             so later givens see earlier bindings
+  (:given BINDINGS FORM...)  let-style bindings plus setup forms; may
+                             appear multiple times, each nested so later
+                             givens see earlier bindings.  A stub is
+                             just a `cl-letf' here; because each given
+                             wraps everything after it, a stub covers
+                             the whole scenario.
   (:when FORM)               the action under test (exactly one)
-  (:then FORM)               an expectation (one or more)
-  (:cleanup FORM...)         cleanup forms, evaluated in order
-                             inside the innermost given \\=`let\\=' and
-                             under the \\=`unwind-protect\\=' before
-                             \\=`ert-gwt--cleanup\\=', so they run even
-                             when the test fails
+  (:then FORM)               an expectation (one or more), stated in
+                             observable, business-level terms
+  (:cleanup FORM...)         cleanup forms, evaluated in order inside
+                             the innermost given `let'
 
-The macro expands to an \\=`ert-deftest\\=' whose body evaluates the
-\\=`:given\\=' clauses in order and runs the \\=`:when\\=' form.  WHEN is
-wrapped in \\=`condition-case\\=' and all THENs are reported with
-Unicode status marks -- ✓ when the THEN succeeded, ✗ when it
-failed, and − when it was not executed because the WHEN or an
-earlier THEN failed.  Each clause's source is echoed through
-\\=`ert-info\\=', and if any clause failed, the first error is
-re-signalled after all THENs are accounted for, inside an
-\\=`ert-info\\=' summary that lists one status line per WHEN and THEN
-clause, so the whole scenario's outcome is readable directly from
-the *ert* failure report, without relying on message logs.  The
-test body and the user-supplied \\=`:cleanup\\=' forms run under
-\\=`unwind-protect\\=', so cleanup happens unconditionally even on
-failure.  The \\=`:cleanup\\=' forms are evaluated inside the nested
-given scope, after the \\=`:when\\=' and \\=`:then\\=' forms, so they can
-refer to any given binding.  After the cleanup forms,
-\\=`ert-gwt--cleanup\\=' performs automatic cleanup: buffers created
-during the test are killed, and temp files created via
-\\=`ert-gwt--temp-file\\=' are deleted (files created by any other
-means are not tracked and are not removed).  Buffers that existed
-before the test are never touched, because the snapshot in
-\\=`ert-gwt--initial-buffers\\=' is captured via \\=`buffer-list\\=' at the
-very start of the test body, before any clause runs; consequently
-buffers created before the macro expansion's body executes (i.e.,
-outside this macro) are outside the snapshot's diff and are
-preserved.
+Failure reporting: WHEN runs under `condition-case'; each THEN is
+marked ✓ (passed), ✗ (failed), or − (skipped because WHEN or an
+earlier THEN failed).  Each clause's source is echoed through
+`ert-info', and on failure the first error is re-signalled inside an
+`ert-info' summary listing one status line per WHEN and THEN, so the
+scenario outcome is readable directly from the *ert* report.
 
-The macro also records the defining file at expansion time as a
-symbol property \\=`ert-gwt--defining-file\\=' on the generated test name
-symbol; the advice in \\=`ert-gwt--advice-find-test-other-window\\='
-reads that property to fix up \\=`ert-find-test-other-window\\='
-jumps for generated test names, which the default literal search
-cannot find in the source.
+Cleanup: the body runs under `unwind-protect'.  The user `:cleanup'
+forms run first (they can see all given bindings), then
+`ert-gwt--cleanup' performs automatic cleanup of tracked buffers and
+temp files; pre-existing buffers are never touched.
 
-Standard example.  The scenario: an old file already exists on
-disk; the user approves an overwrite prompt; afterwards the file
-holds the new contents.  Everything that sets up the world --
-the temp file (made with \\=`ert-gwt--temp-file\\=' so it is tracked),
-its old and new contents, and the stub answering \"y\" -- belongs
-in \\=`:given\\='.  A stub is written as a given too: a \\=`cl-letf\\='
-rebinding placed inside \\=`:given\\=', which works because each
-\\=`:given\\=' segment expands to a \\=`let\\=' that wraps all later givens,
-the \\=`:when\\=', every \\=`:then\\=', and the
-\\=`:cleanup\\=' forms, so a stub binding there covers the whole
-scenario without leaving the GWT vocabulary.  \\=`:when\\=' is the
-single user action (saving the new contents), and each \\=`:then\\='
-states an observable outcome in business language (the file now
-contains the new text).
+Standard example.  An old file exists on disk; the user approves an
+overwrite prompt; afterwards the file holds the new contents.
 
   (ert-gwt-deftest
     (:given ((file (ert-gwt--temp-file \"data.txt\"))
@@ -494,12 +410,8 @@ contains the new text).
                             (buffer-string)))))
     (:cleanup (delete-file file)))
 
-Here the temp file, its old and new contents, and the stubbed
-prompt answer are world state, placed in \\=`:given\\='; \\=`:when\\=' is
-exactly one action, the call under test; and \\=`:then\\=' observes
-only its result, in terms a user would recognize.  Anything not
-observable from outside the code under test does not belong in
-\\=`:then\\='."
+Anything not observable from outside the code under test does not
+belong in `:then'."
   (declare (indent 0))
   (let* ((parsed (ert-gwt--parse-clauses clauses))
          (name (ert-gwt--name clauses))

@@ -17,10 +17,9 @@
 
 (defun ert-gwt-test--package-root ()
   "Return the root directory of the ert-gwt package.
-Works even after loading finished, when `load-file-name' and
-the variable `buffer-file-name' are both nil: it falls back to a `load-path'
-lookup for the main module's directory, then to
-`default-directory'."
+This is normally derived from `load-file-name' (or the visiting
+buffer's file).  The fallbacks only kick in when loading has
+finished and those variables are unavailable."
   (or (when load-file-name
         (file-name-directory load-file-name))
       (when buffer-file-name
@@ -159,14 +158,8 @@ lookup for the main module's directory, then to
       (error nil))))
 
 (ert-deftest ert-gwt-test--expand-givens-nesting ()
-  "Expand-givens should build a single info form joined from the GIVEN lines.
-The message is computed at expansion time.  The `ert-info' wraps a `let*'
-over all segment bindings whose body holds the segment setup forms,
-then a `let' of the runtime note variables whose body is the unwind
-protection.  Its protected form is a `progn' of three elements:
-an `ert-info' with a runtime message form wrapping only a
-`condition-case' around a `progn' of the WHEN form, the THEN cond form, and
-the `ert-gwt--first-error' summary starting with `when'."
+  "Check that `ert-gwt--expand-givens' wraps the body in an outer `ert-info'.
+Verify the let* merges segment bindings and orders WHEN, THEN cond, and summary."
   (let ((expanded (ert-gwt--expand-givens
                    '((((foo 1))) (((bar 2)) (setq bar (1+ bar))))
                    '(= foo bar)
@@ -201,7 +194,7 @@ the `ert-gwt--first-error' summary starting with `when'."
                 (should (eq (car summary) 'when))))))))))
 
 (ert-deftest ert-gwt-test--temp-file-registration ()
-  "Verify that `ert-gwt--temp-file' creates the file on disk and registers it in `ert-gwt--tracked-files'.  Both assertions are plain `should' forms so failure messages are self-explanatory in the *ert* buffer."
+  "Verify that `ert-gwt--temp-file' creates the file on disk and registers it in `ert-gwt--tracked-files'."
   (let (ert-gwt--tracked-files path)
     (unwind-protect
         (progn
@@ -238,13 +231,9 @@ the `ert-gwt--first-error' summary starting with `when'."
       (kill-buffer buf))))
 
 (ert-deftest ert-gwt-test--defining-anchor-fallback-lookup ()
-  "Locate the symbol via its defining-anchor property.
-The advice `ert-gwt--advice-find-test-other-window' must locate
-the symbol via its defining-anchor property (literal string
-search, not regexp), land point at the beginning of the matched
-anchor text, degrade to point-min with a loud message when the
-anchor text is absent, and degrade loudly when the
-defining-anchor property is missing entirely."
+  "Advice locates symbol via defining-anchor and lands at its anchor.
+Fallback: missing or mismatched anchor degrades to point-min with a
+loud message instead of failing silently."
   (let* ((temp-file (make-temp-file "gwt-anchor-test-" nil ".el"))
          (subject 'gwt-test--anchor-subject)
          (anchor-line ";; anchor: (gwt-test--anchor-subject)")
@@ -404,18 +393,13 @@ defining-anchor property is missing entirely."
            (ert-get-test 'ert-gwt-test--name-rejects-describe))
           (ert-info ("Buffer-list is unchanged by the test run")
             (should (equal before (buffer-list)))))
-      ;; Nothing to clean up here, but the guard shows the intent:
-      ;; if the run ever leaks buffers the assertion above fails
-      ;; inside unwind-protect, so the failure is reported rather
-      ;; than silently tolerated.
       nil)))
 
 ;;; Runner
 
 (defun ert-gwt-test--module-features ()
-  "Features to unload before reloading, derived from file names.
-Lists every non-test el file of the package root and its lisp/
-subdirectory, so new module files need no edit here."
+  "Features derived from file names in the package root and lisp/.
+Excludes test files, so new module files need no edit here."
   (let* ((root (ert-gwt-test--package-root))
          (lisp (expand-file-name "lisp" root))
          (files (append
@@ -431,17 +415,13 @@ subdirectory, so new module files need no edit here."
              files))))
 
 (defun ert-gwt-test-run ()
-  "Reload the ert-gwt package from source and run the test suite.
+  "Run the ert-gwt test suite after reloading it from source.
 
-This command is interactive so `M-x ert-gwt-test-run' works from
-any directory; the interactivity exception applies to the test
-entry runner like keybindings do.
-
-Clear prior ERT tests, unload the package features, reload the
-main module and any lisp/ submodules, then load every -test.el
-file.  In batch mode exit with the test result as the process
-status; in interactive use open the `ert' browser for the prefix
-\"test-\"."
+Before running, clear prior ERT tests and unload/reload the
+package from source, then load every -test.el file.  In batch
+mode exit with the test result as the process status; in
+interactive use open the `ert' browser for the prefix
+\"ert-gwt-\"."
   (interactive)
   (let* ((root (ert-gwt-test--package-root))
          (lisp (expand-file-name "lisp" root))
