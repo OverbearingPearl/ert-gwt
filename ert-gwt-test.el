@@ -193,6 +193,15 @@ Verify the let* merges segment bindings and orders WHEN, THEN cond, and summary.
               (let ((summary (nth 3 progn)))
                 (should (eq (car summary) 'when))))))))))
 
+(ert-deftest ert-gwt-test--no-double-should-in-expansion ()
+  "Guard against the double-should bug in macro expansion.
+The :then body must not be wrapped in an extra (should ...) when it
+already contains assertions."
+  (let* ((expansion (macroexpand '(ert-gwt-deftest (:given nil) (:when nil) (:then (should-not nil)))))
+         (text (format "%s" expansion)))
+    (should (string-match "(should-not nil)" text))
+    (should-not (string-match "(should (should-not nil))" text))))
+
 (ert-deftest ert-gwt-test--temp-file-registration ()
   "Verify that `ert-gwt--temp-file' creates the file on disk and registers it in `ert-gwt--tracked-files'."
   (let (ert-gwt--tracked-files path)

@@ -287,14 +287,21 @@ Used to echo GWT clause source into failure reports."
   "Expand one THEN form, recording a status note for every THEN.
 Each THEN expands to a `cond': if an earlier THEN aborted, a
 \"− THEN\" note is recorded; otherwise the assertion runs inside a
-plain `ert-info'.  Success records a \"✓ THEN\" note; failure
-records a \"✗ THEN\" note and stashes the error for the caller to
-re-signal in a summary `ert-info' after all THENs are accounted
-for.  All note strings are rendered at expansion time."
-  (let ((info-text (ert-gwt--clause-text "THEN" THEN))
-        (ok-note (ert-gwt--clause-text "✓ THEN" THEN))
-        (fail-note (ert-gwt--clause-text "✗ THEN" THEN))
-        (skip-note (ert-gwt--clause-text "− THEN" THEN)))
+plain `ert-info'.  When THEN already starts with `should',
+`should-not' or `should-error', it is used as the assertion
+as-is; otherwise it is wrapped in `(should ...).  Success records
+a \"✓ THEN\" note; failure records a \"✗ THEN\" note and stashes
+the error for the caller to re-signal in a summary `ert-info'
+after all THENs are accounted for.  All note strings are rendered
+at expansion time."
+  (let* ((assertion (if (and (consp THEN)
+                             (memq (car THEN) '(should should-not should-error)))
+                        THEN
+                      `(should ,THEN)))
+         (info-text (ert-gwt--clause-text "THEN" THEN))
+         (ok-note (ert-gwt--clause-text "✓ THEN" THEN))
+         (fail-note (ert-gwt--clause-text "✗ THEN" THEN))
+         (skip-note (ert-gwt--clause-text "− THEN" THEN)))
     `(cond
       (ert-gwt--aborted
        (setq ert-gwt--then-notes
@@ -303,7 +310,7 @@ for.  All note strings are rendered at expansion time."
        (condition-case ert-gwt--err
            (progn
              (ert-info (,info-text)
-               (should ,THEN))
+               ,assertion)
              (setq ert-gwt--then-notes
                    (cons ,ok-note ert-gwt--then-notes)))
          (error
