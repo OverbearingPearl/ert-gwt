@@ -83,8 +83,6 @@ wipes the counts recorded for that file; reloading a file therefore
 reproduces name determinism instead of resuming stale counters."
   (remhash (file-truename file) ert-gwt--seen))
 
-(add-hook 'after-load-functions #'ert-gwt--seen-clear-for-load)
-
 (defvar ert-gwt--base-buffers nil
   "Buffers present when a GWT test body started.
 
@@ -137,13 +135,18 @@ flow continues."
 
 When enabled, `ert-find-test-other-window' is advised so that a
 failed literal search falls back to the defining file recorded at
-macro expansion time.  The mode is enabled on load;
-`ert-gwt-unload-function' turns it off on unload."
+macro expansion time, and `after-load-functions' gains the hook
+that records defining files for subsequently loaded files.  The
+mode is enabled on load; `ert-gwt-unload-function' turns it off
+on unload."
   :global t
   :group 'ert-gwt
   (if ert-gwt-defining-file-jump-mode
-      (advice-add 'ert-find-test-other-window :around
-                  #'ert-gwt--advice-find-test-other-window)
+      (progn
+        (advice-add 'ert-find-test-other-window :around
+                    #'ert-gwt--advice-find-test-other-window)
+        (add-hook 'after-load-functions #'ert-gwt--seen-clear-for-load))
+    (remove-hook 'after-load-functions #'ert-gwt--seen-clear-for-load)
     (advice-remove 'ert-find-test-other-window
                    #'ert-gwt--advice-find-test-other-window)))
 
