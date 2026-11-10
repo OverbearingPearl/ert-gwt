@@ -76,6 +76,15 @@ Keys are content hashes, values are how many times each has been
 used, so two test blocks with identical content in the same file
 get distinct names.")
 
+(defun ert-gwt--seen-clear-for-load (file)
+  "Clear the per-file given-name-count subtable for FILE on each load.
+Installed on `after-load-functions', so that every completed load
+wipes the counts recorded for that file; reloading a file therefore
+reproduces name determinism instead of resuming stale counters."
+  (remhash (file-truename file) ert-gwt--seen))
+
+(add-hook 'after-load-functions #'ert-gwt--seen-clear-for-load)
+
 (defvar ert-gwt--base-buffers nil
   "Buffers present when a GWT test body started.
 
@@ -112,9 +121,13 @@ and jumps there, falling back to point-min with a message."
 (defun ert-gwt-unload-function ()
   "Disable `ert-gwt-defining-file-jump-mode' before unload.
 Called automatically by `unload-feature' when unloading this
-package.  Disabling the mode removes the around advice this
-package installed on `ert-find-test-other-window'.  Return nil so
-the normal unloading flow continues."
+package.  Removing `ert-gwt--seen-clear-for-load' from
+`after-load-functions' first ensures no reference remains to a
+function that no longer exists after unloading.  Disabling the
+mode removes the around advice this package installed on
+`ert-find-test-other-window'.  Return nil so the normal unloading
+flow continues."
+  (remove-hook 'after-load-functions #'ert-gwt--seen-clear-for-load)
   (ert-gwt-defining-file-jump-mode -1)
   nil)
 
@@ -188,10 +201,17 @@ collected in order)."
 
 (defun ert-gwt--expand-givens (GIVENS WHEN-FORM THENS CLEANUPS)
   "Expand the GIVEN segments in GIVENS around WHEN-FORM and THENS.
-Generate a single `let*' binding all bindings of every GIVEN segment,
-wrapped in one `ert-info' whose message joins one \"GIVEN: ...\" line
-per segment; bindings within a segment see earlier ones, as in
-`let*'.  The WHEN-FORM is evaluated inside its own `ert-info' and a
+Generate a single `cl-letf*' binding all bindings of every GIVEN
+segment, wrapped in one `ert-info' whose message joins one
+\"GIVEN: ...\" line per segment; bindings are processed in order, so
+each binding sees every earlier one, as in `cl-letf*'.  A binding may
+be a plain `let'-style pair or a `cl-letf' place form such as
+\=((symbol-function \='f) STUB); a place binding stays in effect through
+the WHEN, every THEN and the CLEANUPS, and is undone when the body
+unwinds, so a stub written as a `:given' binding covers the whole
+story.  Saving a place's old value requires the place to be readable
+at setup time, so a function stubbed this way must already be
+defined.  The WHEN-FORM is evaluated inside its own `ert-info' and a
 `condition-case' that records a failure instead of propagating it, so
 WHEN appears as its own unmarked Info line on both success and
 failure.  Each form in THENS is expanded with `ert-gwt--expand-then',
@@ -208,7 +228,7 @@ carrying the unmarked WHEN line and the chronological per-THEN summary."
                  GIVENS))
         (when-text (ert-gwt--clause-text "WHEN" WHEN-FORM)))
     `(ert-info (,(mapconcat #'identity given-lines "\n"))
-       (let* (,@(apply #'append (mapcar #'car GIVENS)))
+       (cl-letf* (,@(apply #'append (mapcar #'car GIVENS)))
          ,@(apply #'append (mapcar #'cdr GIVENS))
          (let ((ert-gwt--then-notes nil)
                (ert-gwt--aborted nil)
@@ -288,14 +308,17 @@ Used to echo GWT clause source into failure reports."
 Each THEN expands to a `cond': if an earlier THEN aborted, a
 \"− THEN\" note is recorded; otherwise the assertion runs inside a
 plain `ert-info'.  When THEN already starts with `should',
-`should-not' or `should-error', it is used as the assertion
-as-is; otherwise it is wrapped in `(should ...).  Success records
+`should-not', `should-error' or `ert-info', it is used as the
+assertion as-is; otherwise it is wrapped in `(should ...).  An
+`ert-info' head counts as a self-contained assertion, since
+wrapping it in `should' would report a spurious failure when an
+inner `should-not' succeeds (returning nil).  Success records
 a \"✓ THEN\" note; failure records a \"✗ THEN\" note and stashes
 the error for the caller to re-signal in a summary `ert-info'
 after all THENs are accounted for.  All note strings are rendered
 at expansion time."
   (let* ((assertion (if (and (consp THEN)
-                             (memq (car THEN) '(should should-not should-error)))
+                             (memq (car THEN) '(should should-not should-error ert-info)))
                         THEN
                       `(should ,THEN)))
          (info-text (ert-gwt--clause-text "THEN" THEN))
@@ -326,13 +349,23 @@ at expansion time."
 The name prefix is derived from the defining file's base name,
 falling back to \"test-gwt\" if unavailable.  Hashing and
 duplicate-name handling are delegated to `ert-gwt-name-from-clauses',
-which tracks per-name usage counts in `ert-gwt--seen'."
-  (intern (ert-gwt-name-from-clauses
-           (if load-file-name
-               (file-name-base load-file-name)
-             "test-gwt")
-           clauses
-           ert-gwt--seen)))
+which tracks per-name usage counts in a per-file sub-table of
+`ert-gwt--seen', keyed by the truename of `load-file-name'; the
+sub-table is created on first use and cleared by
+`ert-gwt--seen-clear-for-load' when the load finishes, so names
+depend only on the file base name and clause contents and remain
+reproducible across reloads."
+  (let* ((file (if load-file-name
+                   (file-truename load-file-name)
+                 "test-gwt"))
+         (prefix (if load-file-name
+                     (file-name-base load-file-name)
+                   "test-gwt"))
+         (subtable (or (gethash file ert-gwt--seen)
+                       (puthash file
+                                (make-hash-table :test 'equal)
+                                ert-gwt--seen))))
+    (intern (ert-gwt-name-from-clauses prefix clauses subtable))))
 
 (defun ert-gwt--defining-anchor (clauses)
   "Return the `prin1' serialization of CLAUSES.

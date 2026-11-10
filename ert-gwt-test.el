@@ -30,6 +30,13 @@ finished and those variables are unavailable."
       (and (file-exists-p "ert-gwt.el")
            (expand-file-name default-directory))))
 
+(defun ert-gwt-test--probe ()
+  "Return the original answer observed when no stub is in place.
+Liveness stories replace this function through a place binding and
+compare the stubbed result against this baseline, both to prove the
+binding took effect and to prove it was undone afterwards."
+  "original-answer")
+
 (when load-file-name
   (add-to-list 'load-path (ert-gwt-test--package-root)))
 
@@ -159,7 +166,8 @@ finished and those variables are unavailable."
 
 (ert-deftest ert-gwt-test--expand-givens-nesting ()
   "Check that `ert-gwt--expand-givens' wraps the body in an outer `ert-info'.
-Verify the let* merges segment bindings and orders WHEN, THEN cond, and summary."
+Verify the `cl-letf*' merges segment bindings and orders WHEN, THEN
+cond, and summary."
   (let ((expanded (ert-gwt--expand-givens
                    '((((foo 1))) (((bar 2)) (setq bar (1+ bar))))
                    '(= foo bar)
@@ -168,10 +176,10 @@ Verify the let* merges segment bindings and orders WHEN, THEN cond, and summary.
     (should (consp expanded))
     (should (eq (car expanded) 'ert-info))
     (should (stringp (car (nth 1 expanded))))
-    (let ((let* (nth 2 expanded)))
-      (should (eq (car let*) 'let*))
-      (should (equal (cadr let*) '((foo 1) (bar 2))))
-      (let ((body (cddr let*)))
+    (let ((letf* (nth 2 expanded)))
+      (should (eq (car letf*) 'cl-letf*))
+      (should (equal (cadr letf*) '((foo 1) (bar 2))))
+      (let ((body (cddr letf*)))
         (should (equal (car body) '(setq bar (1+ bar))))
         (let ((leaf (nth 1 body)))
           (should (eq (car leaf) 'let))
@@ -390,6 +398,14 @@ loud message instead of failing silently."
   (:then (= n 4))
   (:then (> n 0))
   (:then (not (zerop n))))
+
+(ert-gwt-deftest
+  (:given (((symbol-function 'ert-gwt-test--probe)
+            (lambda () :stub-probe))))
+  (:when (ert-gwt-test--probe))
+  (:then (should (eq (ert-gwt-test--probe) :stub-probe)))
+  (:cleanup (ert-info ("Probe must still return the stub at cleanup")
+              (should (eq (ert-gwt-test--probe) :stub-probe)))))
 
 ;;; Test isolation
 

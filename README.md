@@ -150,7 +150,7 @@ Each `:then` expression is wrapped in `should` automatically.
   (:then  (account-locked-p user)))
 ```
 
-`:given` supports both `let`-style bindings and setup forms.
+`:given` supports both `let`-style bindings and setup forms, as well as `cl-letf` place bindings: a place binding is a stub that covers the whole story; see the Standard Examples section.
 
 ### Clause reference
 
@@ -174,10 +174,10 @@ automatically afterwards.
 (ert-gwt-deftest
   (:given ((file (ert-gwt--temp-file "data.txt"))
            (old "old contents")
-           (new "new contents"))
+           (new "new contents")
+           ((symbol-function 'yes-or-no-p)
+            (lambda (_prompt) t)))
           (with-temp-file file (insert old)))
-  (:given (cl-letf (((symbol-function 'yes-or-no-p)
-                     (lambda (_prompt) t)))))
   (:when (with-temp-file file (insert new)))
   (:then (should (equal "new contents"
                         (with-temp-buffer
@@ -189,14 +189,19 @@ automatically afterwards.
 Note what the example does and does not do. Everything that sets up
 the world — the temp file (made with `ert-gwt--temp-file` so it is
 tracked), its old and new contents, and the stub answering "y" —
-belongs in `:given`. A stub is written as a given too: a `cl-letf`
-rebinding placed inside `:given`, which works because each `:given`
-segment expands to a `let` that wraps all later givens, the `:when`,
-every `:then`, and the `:cleanup` forms, so the stub is simply part of
-the given world and GWT never needs a mock concept of its own. The
-`:when` is exactly one user action, and each `:then` states an
-observable outcome in business language. The `:cleanup` clause deletes
-the temp file regardless of the test's outcome.
+belongs in `:given`. A stub is written as a `cl-letf` place binding in
+a `:given` binding list, which works because all the `:given` segments
+expand into a single `cl-letf*`: the place bindings persist through
+the `:when`, every `:then`, and the `:cleanup` forms and are restored
+on unwind, so the stub covers the whole story — it is simply part of
+the given world, and GWT never needs a mock concept of its own. The
+stubbed function must already be defined, since `cl-letf` saves the
+old definition in order to restore it. A `cl-letf` written as a setup
+form is not a stub: the rebinding is undone as soon as the form
+finishes evaluating. The `:when` is exactly one user action, and each
+`:then` states an observable outcome in business language. The
+`:cleanup` clause deletes the temp file regardless of the test's
+outcome.
 
 ## Design principles
 
