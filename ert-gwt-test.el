@@ -2,24 +2,16 @@
 
 ;;; Commentary:
 
-;; Tests for `ert-gwt-deftest' and its internal helpers, plus the
-;; entry point `ert-gwt-test-run' that reloads the package from
-;; source and runs every test.
+;; Tests for `ert-gwt-deftest', its internal helpers and the
+;; `ert-gwt-test-run' entry point.
 
 ;;; Code:
 
 (require 'cl-lib)
 (require 'ert)
 
-;; Bootstrap `load-path' so loading this entry file from any working
-;; directory can find the package root.
-;; Bootstrap `load-path' ...
-
 (defun ert-gwt-test--package-root ()
-  "Return the root directory of the ert-gwt package.
-This is normally derived from `load-file-name' (or the visiting
-buffer's file).  The fallbacks only kick in when loading has
-finished and those variables are unavailable."
+  "Return the root directory of the ert-gwt package."
   (or (when load-file-name
         (file-name-directory load-file-name))
       (when buffer-file-name
@@ -31,12 +23,10 @@ finished and those variables are unavailable."
            (expand-file-name default-directory))))
 
 (defun ert-gwt-test--probe ()
-  "Return the original answer observed when no stub is in place.
-Liveness stories replace this function through a place binding and
-compare the stubbed result against this baseline, both to prove the
-binding took effect and to prove it was undone afterwards."
+  "Return the answer used to check that stubs are undone."
   "original-answer")
 
+;; Let `require' find the package root.
 (when load-file-name
   (add-to-list 'load-path (ert-gwt-test--package-root)))
 
@@ -56,7 +46,7 @@ binding took effect and to prove it was undone afterwards."
       (should (= (length (plist-get parsed :thens)) 2)))))
 
 (ert-deftest ert-gwt-test--parse-then-multiple-clauses ()
-  "Repeated :then clauses concatenate expectations; unknown keys raise error."
+  "Repeated :then clauses concatenate their forms."
   (let ((parsed (ert-gwt--parse-clauses
                  '((:given ((x 1)))
                    (:when t)
@@ -133,8 +123,6 @@ binding took effect and to prove it was undone afterwards."
       (should (equal (plist-get plist :givens)
                      '((nil (message "hi"))))))))
 
-;; The anonymous test defun left behind by this test is cleared on the
-;; next full run: ert-gwt-test-run calls ert-delete-all-tests first.
 (ert-deftest ert-gwt-test--deftest-cleanup-runs-on-failure ()
   (unwind-protect
       (progn
@@ -165,9 +153,7 @@ binding took effect and to prove it was undone afterwards."
       (error nil))))
 
 (ert-deftest ert-gwt-test--expand-givens-nesting ()
-  "Check that `ert-gwt--expand-givens' wraps the body in an outer `ert-info'.
-Verify the `cl-letf*' merges segment bindings and orders WHEN, THEN
-cond, and summary."
+  "Check the body structure produced by `ert-gwt--expand-givens'."
   (let ((expanded (ert-gwt--expand-givens
                    '((((foo 1))) (((bar 2)) (setq bar (1+ bar))))
                    '(= foo bar)
@@ -202,23 +188,19 @@ cond, and summary."
                 (should (eq (car summary) 'when))))))))))
 
 (ert-deftest ert-gwt-test--no-double-should-in-expansion ()
-  "Guard against the double-should bug in macro expansion.
-The :then body must not be wrapped in an extra (should ...) when it
-already contains assertions."
+  "A `:then' body that already asserts is not wrapped in `should'."
   (let* ((expansion (macroexpand '(ert-gwt-deftest (:given nil) (:when nil) (:then (should-not nil)))))
          (text (format "%s" expansion)))
     (should (string-match "(should-not nil)" text))
     (should-not (string-match "(should (should-not nil))" text))))
 
 (ert-deftest ert-gwt-test--temp-file-registration ()
-  "Verify that `ert-gwt--temp-file' creates the file on disk and registers it in `ert-gwt--tracked-files'."
+  "`ert-gwt--temp-file' creates the file and records it for cleanup."
   (let (ert-gwt--tracked-files path)
     (unwind-protect
         (progn
           (setq path (ert-gwt--temp-file "gwt-test"))
-          ;; Temp file must exist on disk after creation.
           (should (file-exists-p path))
-          ;; Temp file must be registered in the tracker list.
           (should (member path ert-gwt--tracked-files)))
       (when (and path (file-exists-p path))
         (delete-file path)))))
@@ -248,9 +230,7 @@ already contains assertions."
       (kill-buffer buf))))
 
 (ert-deftest ert-gwt-test--defining-anchor-fallback-lookup ()
-  "Advice locates symbol via defining-anchor and lands at its anchor.
-Fallback: missing or mismatched anchor degrades to point-min with a
-loud message instead of failing silently."
+  "Jump advice finds the anchor and degrades loudly when it is missing."
   (let* ((temp-file (make-temp-file "gwt-anchor-test-" nil ".el"))
          (subject 'gwt-test--anchor-subject)
          (anchor-line ";; anchor: (gwt-test--anchor-subject)")
@@ -264,8 +244,7 @@ loud message instead of failing silently."
           (with-temp-file temp-file
             (insert body))
           (put subject 'ert-gwt--defining-file temp-file)
-          ;; Case 1: anchor text present -> point lands at match-beginning
-          ;; in the buffer the advice opened for temp-file.
+          ;; Anchor present.
           (put subject 'ert-gwt--defining-anchor anchor-line)
           (ert-info ("Anchor lookup must land point at the start of the matched anchor symbol in the opened file buffer")
             (goto-char (point-min))
@@ -276,7 +255,7 @@ loud message instead of failing silently."
             (should (equal
                      (line-number-at-pos (point))
                      2)))
-          ;; Case 2: anchor text absent -> degrade to point-min, loud message.
+          ;; Anchor missing.
           (put subject 'ert-gwt--defining-anchor missing-anchor)
           (let ((log ""))
             (cl-letf (((symbol-function 'message)
@@ -295,7 +274,7 @@ loud message instead of failing silently."
                 (should (string-match-p
                          "anchor"
                          log)))))
-          ;; Case 3: defining-anchor property missing -> degrade loudly.
+          ;; No anchor recorded.
           (put subject 'ert-gwt--defining-anchor nil)
           (let ((log ""))
             (cl-letf (((symbol-function 'message)
@@ -314,7 +293,7 @@ loud message instead of failing silently."
                 (should (string-match-p
                          "no defining anchor"
                          log)))))
-          ;; Kill any buffer the advice opened via find-file-other-window.
+          ;; Kill the buffer opened by the advice.
           (dolist (buf (buffer-list))
             (when (and (buffer-live-p buf)
                        (equal (buffer-file-name buf) temp-file))
@@ -323,15 +302,13 @@ loud message instead of failing silently."
         (when (and (buffer-live-p buf)
                    (equal (buffer-file-name buf) temp-file))
           (kill-buffer buf)))
-      ;; Cleanup-path degradation point: deleting the temp file may
-      ;; fail (e.g. file already gone or permissions); swallow the
-      ;; error explicitly so cleanup never masks the test result.
+      ;; Do not let a failed deletion mask the test result.
       (condition-case _err
           (delete-file temp-file)
         (error nil)))))
 
 (ert-deftest ert-gwt-test--cleanup ()
-  "Cleanup kills tracked buffers and files, resets tracker."
+  "`ert-gwt--cleanup' kills new buffers, deletes tracked files and resets the list."
   (let* ((pre-buffers (buffer-list))
          ert-gwt--tracked-files
          buf path)
@@ -352,7 +329,7 @@ loud message instead of failing silently."
         (kill-buffer buf)))))
 
 (ert-deftest ert-gwt-test--name-and-cleanup-branches ()
-  "Cover uncovered branches of `ert-gwt--name', `ert-gwt-name-from-clauses' and `ert-gwt--cleanup'."
+  "Check name fallbacks, duplicate suffixes and directory cleanup."
   (ert-info ("ert-gwt--name: load-file-name nil falls back to the \"test-gwt\" prefix")
     (let (load-file-name)
       (should (string-prefix-p "test-gwt"
@@ -423,8 +400,7 @@ loud message instead of failing silently."
 ;;; Runner
 
 (defun ert-gwt-test--module-features ()
-  "Features derived from file names in the package root and lisp/.
-Excludes test files, so new module files need no edit here."
+  "Return features for every package file except test files."
   (let* ((root (ert-gwt-test--package-root))
          (lisp (expand-file-name "lisp" root))
          (files (append
@@ -440,13 +416,8 @@ Excludes test files, so new module files need no edit here."
              files))))
 
 (defun ert-gwt-test-run ()
-  "Run the ert-gwt test suite after reloading it from source.
-
-Before running, clear prior ERT tests and unload/reload the
-package from source, then load every -test.el file.  In batch
-mode exit with the test result as the process status; in
-interactive use open the `ert' browser for the prefix
-\"ert-gwt-\"."
+  "Reload ert-gwt from source and run the suite.
+In batch mode, exit with the result; interactively, open the ERT results."
   (interactive)
   (let* ((root (ert-gwt-test--package-root))
          (lisp (expand-file-name "lisp" root))
