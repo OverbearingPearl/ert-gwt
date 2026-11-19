@@ -151,34 +151,38 @@ ones and a place stub covers the whole scenario.  A stubbed function
 must already be defined, since its old value is read at setup time.
 WHEN and each THEN are reported separately; a failure is re-signalled
 after every clause has run, and CLEANUPS always run."
-  (let ((given-lines
+  (let* ((given-lines
          (mapcar (lambda (segment)
                    (ert-gwt--clause-text "GIVEN" segment))
                  GIVENS))
-        (when-text (ert-gwt--clause-text "WHEN" WHEN-FORM)))
+        (when-text (ert-gwt--clause-text "WHEN" WHEN-FORM))
+        ;; The steps alone are the body when there is nothing to clean up.
+        ;; `unwind-protect' with no unwind forms is legal but pointless, and
+        ;; Emacs 30 warns about it on every test that has no `:cleanup'.
+        (steps
+         `((ert-info (,when-text)
+              (condition-case ert-gwt--err
+                  (progn ,WHEN-FORM)
+                (error
+                 (setq ert-gwt--aborted t)
+                 (setq ert-gwt--first-error ert-gwt--err))))
+           ,@(mapcar #'ert-gwt--expand-then THENS)
+           (when ert-gwt--first-error
+             (ert-info (,when-text)
+               (ert-info ((mapconcat #'identity
+                                     (nreverse ert-gwt--then-notes)
+                                     "\n"))
+                 (signal (car ert-gwt--first-error)
+                         (cdr ert-gwt--first-error))))))))
     `(ert-info (,(mapconcat #'identity given-lines "\n"))
        (cl-letf* (,@(apply #'append (mapcar #'car GIVENS)))
          ,@(apply #'append (mapcar #'cdr GIVENS))
          (let ((ert-gwt--then-notes nil)
                (ert-gwt--aborted nil)
                (ert-gwt--first-error nil))
-           (unwind-protect
-               (progn
-                 (ert-info (,when-text)
-                   (condition-case ert-gwt--err
-                       (progn ,WHEN-FORM)
-                     (error
-                      (setq ert-gwt--aborted t)
-                      (setq ert-gwt--first-error ert-gwt--err))))
-                 ,@(mapcar #'ert-gwt--expand-then THENS)
-                 (when ert-gwt--first-error
-                   (ert-info (,when-text)
-                     (ert-info ((mapconcat #'identity
-                                           (nreverse ert-gwt--then-notes)
-                                           "\n"))
-                       (signal (car ert-gwt--first-error)
-                               (cdr ert-gwt--first-error))))))
-             ,@CLEANUPS))))))
+           ,(if CLEANUPS
+                `(unwind-protect (progn ,@steps) ,@CLEANUPS)
+              `(progn ,@steps)))))))
 
 (defvar ert-gwt--tracked-files nil
   "Temp files created by `ert-gwt--temp-file', deleted after each test.")
