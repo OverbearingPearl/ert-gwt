@@ -152,9 +152,10 @@ source when that exists, and otherwise reports the `.elc` file it was
 loaded from.
 
 `ert-gwt-defining-file-jump-mode` enables this when ert-gwt loads. It
-advises `find-function-search-for-symbol`, `find-definition-noselect`
-and `ert-test-file-name`; ordinary function definitions are left
-alone. `ert-test-file-name` reports the readable source when it exists,
+advises `find-function-search-for-symbol`, `find-definition-noselect`,
+`ert-test-file-name` and `ert--make-xrefs-region`; ordinary function
+definitions are left alone. Set `ert-gwt-auto-enable-jump-mode` to nil
+before loading ert-gwt if you prefer to enable the mode yourself. `ert-test-file-name` reports the readable source when it exists,
 and the loaded `.elc` when the source is gone, so ERT's file links do
 not point at a missing file.
 
@@ -164,10 +165,9 @@ behind. Changing a clause removes the old definition from the same
 file. `C-M-x` on one form replaces that form only; it does not sweep
 the rest of the file.
 
-One limit remains. ERT's condition-text buttons still only turn
-function definitions into links; the test-name button and
-`ert-describe-test` are the supported ways to reach a GWT form. The
-generated docstring lists the GIVEN, WHEN and THEN clauses, so
+Generated test names in ERT's condition text are buttons too, so the
+failure report reaches the defining form directly. The generated
+docstring lists the GIVEN, WHEN and THEN clauses, so
 `ert-describe-test` is useful without opening the source.
 
 

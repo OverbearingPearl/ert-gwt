@@ -288,6 +288,22 @@ clauses do not leave old tests."
       (ert-gwt--delete-stale-tests source generation))
     result))
 
+(defun ert-gwt--advice-make-xrefs-region (orig begin end)
+  "Call ORIG, then link GWT test names between BEGIN and END.
+ERT only links names that have a `defun' definition; generated tests
+have only an `ert--test' definition, so they are skipped otherwise."
+  (funcall orig begin end)
+  (save-excursion
+    (goto-char begin)
+    (while (re-search-forward "\\(?:\\sw\\|\\s_\\)+" end t)
+      (let* ((start (match-beginning 0))
+             (symbol (intern-soft (match-string-no-properties 0)))
+             (definition (and symbol (get symbol 'ert-gwt--definition)))
+             (file (plist-get definition :file)))
+        (when (and file (not (button-at start)))
+          (goto-char start)
+          (help-xref-button 0 'help-function-def symbol file))))))
+
 (defun ert-gwt--advice-test-file-name (orig test)
   "Call ORIG for TEST, preferring a readable source file.
 A test loaded from a byte-compiled file reports its source when that
@@ -325,6 +341,8 @@ file."
                     #'ert-gwt--advice-find-definition-noselect)
         (advice-add 'ert-test-file-name :around
                     #'ert-gwt--advice-test-file-name)
+        (advice-add 'ert--make-xrefs-region :around
+                    #'ert-gwt--advice-make-xrefs-region)
         (advice-add 'load :around #'ert-gwt--advice-load)
         (advice-add 'eval-buffer :around #'ert-gwt--advice-eval-buffer)
         (add-hook 'after-load-functions #'ert-gwt--seen-clear-for-load))
@@ -335,10 +353,20 @@ file."
                    #'ert-gwt--advice-find-definition-noselect)
     (advice-remove 'ert-test-file-name
                    #'ert-gwt--advice-test-file-name)
+    (advice-remove 'ert--make-xrefs-region
+                   #'ert-gwt--advice-make-xrefs-region)
     (advice-remove 'load #'ert-gwt--advice-load)
     (advice-remove 'eval-buffer #'ert-gwt--advice-eval-buffer)))
 
-(ert-gwt-defining-file-jump-mode 1)
+(defcustom ert-gwt-auto-enable-jump-mode t
+  "Whether loading ert-gwt enables `ert-gwt-defining-file-jump-mode'.
+Set this to nil before loading ert-gwt to keep the finder advices off."
+  :type 'boolean
+  :group 'ert-gwt)
+
+(when (and (boundp 'ert-gwt-auto-enable-jump-mode)
+           (symbol-value 'ert-gwt-auto-enable-jump-mode))
+  (ert-gwt-defining-file-jump-mode 1))
 
 (when (and (boundp 'load-file-name) load-file-name)
   (let ((dir (file-name-directory load-file-name)))

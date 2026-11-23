@@ -186,6 +186,33 @@
       (when (and name (ert-test-boundp name))
         (ert-delete-test name)))))
 
+(ert-deftest gwt-tests--xrefs-link-generated-tests ()
+  "ERT condition text links a generated test name to its definition."
+  (let ((load-file-name
+         (symbol-file 'gwt-tests--xrefs-link-generated-tests 'ert--test))
+        name)
+    (unwind-protect
+        (progn
+          (setq name
+                (eval '(ert-gwt-deftest
+                         (:given ((x 1)))
+                         (:when (ignore x))
+                         (:then (should (= x 1))))
+                      t))
+          (with-temp-buffer
+            (insert "The test " (symbol-name name) " failed")
+            (ert--make-xrefs-region (point-min) (point-max))
+            (goto-char (point-min))
+            (search-forward (symbol-name name))
+            (let ((button (button-at (match-beginning 0))))
+              (should button)
+              (should (equal (button-get button 'help-args)
+                             (list name
+                                   (plist-get (get name 'ert-gwt--definition)
+                                              :file)))))))
+      (when (and name (ert-test-boundp name))
+        (ert-delete-test name)))))
+
 (ert-deftest gwt-tests--expand-givens-nesting ()
   "Check the body structure produced by `ert-gwt--expand-givens'."
   (let ((expanded (ert-gwt--expand-givens
