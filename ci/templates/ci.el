@@ -73,6 +73,13 @@
 ;;                    :shown 20
 ;;                    :skip ("\\`;" "\\`(require" "\\`(provide"))))
 
+;; Coverage instruments the same source set by default.  A package whose
+;; modules live elsewhere overrides :coverage the same way; a directory is
+;; walked recursively, and "." is the entry point at the root.
+;; (setq p/config
+;;       (plist-put p/config :coverage
+;;                  '(:directories ("lisp" "."))))
+
 (provide 'ci)
 
 ;;; ci.el ends here

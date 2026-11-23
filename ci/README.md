@@ -70,8 +70,8 @@ project that has never customised those files.
 
 | half | lives in | pulled |
 | --- | --- | --- |
-| checks, scripts, benchmarks, the size report | `ci/` | yes |
-| policy: Emacs versions, directories, budgets, size | `config/ci.el` | no |
+| checks, scripts, benchmarks, the size and coverage reports | `ci/` | yes |
+| policy: Emacs versions, directories, budgets, size, coverage | `config/ci.el` | no |
 | a benchmark of this package's own hot path | `config/perf.el` | no |
 | a definition count for `make size` | `config/size.el` | no |
 | vendored packages | `vendor/` | no, the project's own |

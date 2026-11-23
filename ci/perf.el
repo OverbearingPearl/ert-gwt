@@ -3,7 +3,7 @@
 ;;; Commentary:
 
 ;; The numbers this package's design rests on, as budgets rather than prose.
-;; `make perf' measures them and fails when one goes over; `make perf-report'
+;; `make perf-check' measures them and fails when one goes over; `make perf'
 ;; prints the same table and never fails, for a machine that is not quiet.
 ;;
 ;; Two kinds of budget live here.  Absolute ones are generous multiples of the

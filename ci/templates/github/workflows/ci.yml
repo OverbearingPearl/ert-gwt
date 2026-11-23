@@ -85,6 +85,17 @@ jobs:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/size
 
+  # Report only, like size: instrumentation changes what the code does, so a
+  # suite with timing assertions can be red here and green in the test job
+  # above. Coverage is the number this job produces, not the verdict it
+  # enforces; the artifact is the point.
+  coverage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/coverage
+
   # Manual only, and the reason is the shape of melpazoid's cost.  It builds
   # a container whose base compiles Emacs from source (tens of minutes), then
   # runs checkdoc, package-lint and byte-compile inside it -- the same three
