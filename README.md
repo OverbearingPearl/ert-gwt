@@ -195,7 +195,7 @@ Each `:then` expression is wrapped in `should` automatically.
   (:then  (account-locked-p user)))
 ```
 
-`:given` supports both `let`-style bindings and setup forms, as well as `cl-letf` place bindings: a place binding is a stub that covers the whole story; see the Standard Examples section.
+`:given` supports both `let`-style bindings and setup forms, as well as `cl-letf` place bindings: a place binding is a stub that covers the whole story; see “The standard example” below.
 
 ### Clause reference
 
