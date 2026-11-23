@@ -49,9 +49,10 @@
 (require 'subr-x)
 
 (defvar ert-gwt--seen (make-hash-table :test 'equal)
-  "Per-file test name counters.
+  "Per-file test name records.
 Keys are file truenames; values are hash tables mapping name bases to
-use counts.")
+records used by `ert-gwt--compute-name'.  Older callers may still
+supply an integer count instead of a record.")
 
 (defvar ert-gwt--generation 0
   "Generation number for the most recent definition pass.")
@@ -680,6 +681,34 @@ The prefix is the defining file's base name, or \"test-gwt\" when no
 source file is known; counters are kept per file in `ert-gwt--seen'."
   (car (ert-gwt--name-and-occurrence clauses)))
 
+(defun ert-gwt--taken-record (taken base)
+  "Return BASE's record from TAKEN.
+A record is a plist with :count (the largest suffix in use) and
+:names (an alist of suffix strings to clauses).  An integer value is
+the form older callers used and is treated as an unknown claim."
+  (let ((value (gethash base taken)))
+    (cond
+     ((and (consp value) (eq (car value) :count)) value)
+     ((integerp value) (list :count value :names nil))
+     (t (list :count 0 :names nil)))))
+
+(defun ert-gwt--suffix-number (suffix)
+  "Return the numeric position encoded by SUFFIX."
+  (if (string= suffix "") 1 (string-to-number (substring suffix 1))))
+
+(defun ert-gwt--suffix-name (base number)
+  "Return BASE with NUMBER appended as a name suffix."
+  (if (= number 1) base (format "%s-%d" base number)))
+
+(defun ert-gwt--claim-name (record clauses number)
+  "Record CLAUSES as using NUMBER under RECORD.
+Return the new name.  NUMBER is one-based, so 1 is the bare base."
+  (let ((suffix (if (= number 1) "" (format "-%d" number))))
+    (setf (plist-get record :count)
+          (max (plist-get record :count) number))
+    (push (cons suffix clauses) (plist-get record :names))
+    suffix))
+
 (defun ert-gwt--compute-name (prefix clauses taken &optional context occurrence)
   "Return (NAME . OCCURRENCE) for CLAUSES under PREFIX.
 NAME is PREFIX-HASH8, with -2, -3, ... appended on collisions in
@@ -687,7 +716,8 @@ TAKEN; OCCURRENCE is the one-based count for that name.  CONTEXT is
 mixed into the hash so equal clauses in different files differ.
 When OCCURRENCE is non-nil, use it instead of the counter in TAKEN;
 the counter is still advanced so a later counter-based call does not
-reuse the same suffix."
+reuse the same suffix.  Different clauses that happen to share the
+same hash are kept apart too, instead of reusing the bare base."
   (let* ((hash
           (substring
            (secure-hash 'sha1
@@ -696,29 +726,40 @@ reuse the same suffix."
                                 (ert-gwt--print-form clauses)))
            0 8))
          (base (format "%s-%s" prefix hash))
-         (count (gethash base taken 0)))
+         (record (ert-gwt--taken-record taken base)))
     (if occurrence
-        (let ((count (max occurrence count)))
-          (puthash base count taken)
-          (cons (if (= occurrence 1)
-                    base
-                  (format "%s-%d" base occurrence))
-                occurrence))
-      (if (zerop count)
-          (progn
-            (puthash base 1 taken)
-            (cons base 1))
-        (puthash base (1+ count) taken)
-        (cons (format "%s-%d" base (1+ count)) (1+ count))))))
+        (let* ((number occurrence)
+               (suffix (if (= number 1) "" (format "-%d" number)))
+               (entry (assoc suffix (plist-get record :names)))
+               (legacy (and (= number 1)
+                            (> (plist-get record :count) 0)
+                            (null (plist-get record :names)))))
+          (cond
+           ((and entry (equal (cdr entry) clauses))
+            (puthash base record taken)
+            (cons (concat base suffix) occurrence))
+           ((or entry legacy)
+            (let ((suffix (ert-gwt--claim-name
+                           record clauses (1+ (plist-get record :count)))))
+              (puthash base record taken)
+              (cons (concat base suffix) occurrence)))
+           (t
+            (ert-gwt--claim-name record clauses number)
+            (puthash base record taken)
+            (cons (concat base suffix) occurrence))))
+      (let ((number (1+ (plist-get record :count))))
+        (let ((suffix (ert-gwt--claim-name record clauses number)))
+          (puthash base record taken)
+          (cons (concat base suffix) number))))))
 
 (defun ert-gwt-name-from-clauses (prefix clauses taken &optional context occurrence)
   "Return a test name for CLAUSES under PREFIX.
 The name is PREFIX-HASH8, with -2, -3, ... appended on collisions
-within TAKEN.  TAKEN maps name bases to use counts and is updated in
-place.  CONTEXT, when non-nil, separates equal clauses in different
-files; `ert-gwt-name-context' is the rule the macro uses.  When
-OCCURRENCE is non-nil, use it as the suffix position instead of the
-counter in TAKEN."
+within TAKEN.  TAKEN maps name bases to records used to keep names
+unique and is updated in place.  CONTEXT, when non-nil, separates
+equal clauses in different files; `ert-gwt-name-context' is the rule
+the macro uses.  When OCCURRENCE is non-nil, use it as the suffix
+position instead of the counter in TAKEN."
   (car (ert-gwt--compute-name prefix clauses taken context occurrence)))
 
 (defmacro ert-gwt-deftest (&rest clauses)

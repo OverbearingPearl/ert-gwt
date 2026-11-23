@@ -604,6 +604,25 @@
             (should (equal context-a context-c))))
       (delete-directory base t))))
 
+(ert-deftest gwt-tests--name-separates-colliding-hashes ()
+  "Different clauses with the same hash do not share a test name."
+  (let ((taken (make-hash-table :test #'equal))
+        (clauses-a '((:when t)))
+        (clauses-b '((:when nil))))
+    (cl-letf (((symbol-function 'secure-hash)
+               (lambda (&rest _args) "0123456789abcdef")))
+      (let ((a (ert-gwt-name-from-clauses "dup" clauses-a taken nil 1))
+            (b (ert-gwt-name-from-clauses "dup" clauses-b taken nil 1))
+            (a-again (ert-gwt-name-from-clauses
+                      "dup" clauses-a taken nil 1)))
+        (ert-info ("The first clause keeps the bare base")
+          (should (equal a "dup-01234567")))
+        (ert-info ("A hash collision gets the next suffix")
+          (should-not (equal a b))
+          (should (equal b "dup-01234567-2")))
+        (ert-info ("Re-evaluating the same clause keeps its name")
+          (should (equal a-again a)))))))
+
 (ert-deftest gwt-tests--load-twice-replaces-test ()
   "Loading the same file twice keeps one test with one name."
   (let* ((before (mapcar #'ert-test-name (ert-select-tests t t)))
