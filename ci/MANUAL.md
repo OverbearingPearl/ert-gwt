@@ -123,7 +123,7 @@ Three rules are about a file's shape rather than its content:
 
 | rule | wants |
 |---|---|
-| `text-hygiene` | no trailing whitespace, exactly one final newline, every tracked text file outside `vendor/` |
+| `text-hygiene` | no trailing whitespace, exactly one final newline, every tracked or untracked text file outside `vendor/` |
 | `blank-lines` | at most one consecutive blank line |
 | `commentary-width` | lines inside `;;; Commentary` fit `:commentary-width` columns as displayed, not as characters |
 
@@ -571,6 +571,12 @@ everything, because both are the sort of file whose loss is silent -- a
 replaced `Makefile` stops running the project's own audit without saying so,
 and a replaced `config/ci.el` takes the layer table with it.
 
+`.gitignore` is stricter still: bootstrap writes the template only when the
+project has none. A project's ignore file usually predates ci and lists paths
+ci knows nothing about, so an existing one is kept even under `--force`. The
+template ignores `.cache/` and `build/` because the lint job creates both; an
+older project that keeps its own file has to add those two lines by hand.
+
 A target of the project's own therefore does not belong in the `Makefile` at
 all. It goes in `config/targets.mk`, which the template includes: a target
 declared there, and the line `lint: <target>`, wire it into `make lint`
@@ -602,7 +608,7 @@ suite instead, so local and CI enforce the same code:
 
 | used to be | now |
 |---|---|
-| `trailing-whitespace` | `text-hygiene`, for every tracked text file outside `vendor/` |
+| `trailing-whitespace` | `text-hygiene`, for every tracked or untracked text file outside `vendor/` |
 | `end-of-file-fixer` | `text-hygiene` (exactly one final newline, same files) |
 | `check-yaml` | not in the gate; see below |
 

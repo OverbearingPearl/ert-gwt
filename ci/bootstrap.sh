@@ -16,11 +16,13 @@ Writes the files a project owns. Run it once after adding ci/ as a subtree,
 and again only when a pull changes a template.
 
   --force        replace what it is allowed to replace: the hook config and
-                 .github/.  It never replaces the Makefile or config/ci.el,
-                 because project targets belong in config/targets.mk and the
-                 config is the project's alone.  It also takes over the git
-                 hooks when the project has its own.  It refuses to replace a
-                 file with uncommitted changes; stash or commit them first
+                 .github/.  It never replaces the Makefile, config/ci.el or
+                 .gitignore, because project targets belong in
+                 config/targets.mk, the config is the project's alone, and an
+                 ignore file usually lists paths ci knows nothing about.  It
+                 also takes over the git hooks when the project has its own.
+                 It refuses to replace a file with uncommitted changes; stash
+                 or commit them first
   --help         this text
 
 What it writes, and what to do with each:
@@ -29,6 +31,8 @@ What it writes, and what to do with each:
                             commit, tests before a push
   config/ci.el              the Emacs version this package claims; every other
                             knob of ci/config.el can be overridden there too
+  .gitignore                compiler output, package caches, dist/ and CI
+                            logs; written only when the project has none
   .github/                  lint, test, size and perf, plus a manual
                             melpazoid check
 
@@ -145,6 +149,17 @@ cd "$root"
 
 write "Makefile" "$here/templates/Makefile"
 write "config/ci.el" "$here/templates/ci.el"
+
+# A project's .gitignore usually predates ci and lists paths ci knows nothing
+# about.  Write the template only when there is none; never replace an existing
+# one, not even with --force.
+if [ -e .gitignore ]; then
+  echo "kept .gitignore (exists; bootstrap only writes one when absent)"
+else
+  cp "$here/templates/gitignore" .gitignore
+  echo "wrote .gitignore (cache, build and packaging artifacts)"
+  touched="$touched .gitignore"
+fi
 
 # Where git keeps this repository's hooks. `--git-path' follows core.hooksPath
 # and worktrees; the fallback is for a git too old to answer.

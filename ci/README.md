@@ -37,6 +37,11 @@ workflows the templates would have provided. `--force` replaces a file, which
 is worth reading twice for `.github/`: it deletes every workflow already
 there.
 
+A `.gitignore` is written only when the project has none. An existing one is
+kept even under `--force`, because it usually lists paths ci knows nothing
+about; the template's `.cache/` and `build/` entries have to be added by hand
+to an older file.
+
 `ci/bootstrap.sh --help` is the whole usage, and it ends with the four things
 the project owns from then on.
 
@@ -70,7 +75,7 @@ project that has never customised those files.
 | a benchmark of this package's own hot path | `config/perf.el` | no |
 | a definition count for `make size` | `config/size.el` | no |
 | vendored packages | `vendor/` | no, the project's own |
-| workflows, actions, `Makefile`, hook config | `.github/`, root files | no, written once |
+| workflows, actions, `Makefile`, `.gitignore`, hook config | `.github/`, root files | no, written once |
 
 Editing anything under `ci/` conflicts with the next pull. Everything else is
 yours.

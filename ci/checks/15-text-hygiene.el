@@ -2,7 +2,8 @@
 
 ;;; Commentary:
 
-;; Every file tracked by git that is not binary, Emacs Lisp included:
+;; Every file git knows about, tracked or untracked, that is not binary,
+;; Emacs Lisp included:
 ;; no trailing whitespace and exactly one final newline.  This is the
 ;; check that covers files the package checks never look at, such as
 ;; ci/, .github/, README and .gitignore.
@@ -38,8 +39,9 @@
             (when (string-match-p "[ \t]+\r?$" line)
               (p/add-error check full line-num "trailing whitespace"))))))))
 
-(p/defcheck-global text-hygiene :scope "every tracked text file outside vendor/"
-  "Every tracked text file outside vendor/: no trailing whitespace, one final newline."
+(p/defcheck-global text-hygiene
+  :scope "every tracked or untracked text file outside vendor/"
+  "Every tracked or untracked text file outside vendor/: no trailing whitespace, one final newline."
   (let ((root (p/repo-root))
         (vendor (p/vendor-dir)))
     (dolist (rel (p/tracked-files))
