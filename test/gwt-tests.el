@@ -317,6 +317,38 @@
       (when (file-exists-p file)
         (delete-file file)))))
 
+(ert-deftest gwt-tests--compiled-without-source ()
+  "A compiled-only test reports the .elc and jumps with a clear error."
+  (let* ((before (mapcar #'ert-test-name (ert-select-tests t t)))
+         (file (make-temp-file "gwt-elconly-" nil ".el"))
+         (elc (concat (file-name-sans-extension file) ".elc"))
+         names name)
+    (unwind-protect
+        (progn
+          (with-temp-file file
+            (insert ";;; gwt-elconly.el --- test -*- lexical-binding: t; -*-\n")
+            (insert "(require 'ert-gwt)\n\n")
+            (insert "(ert-gwt-deftest\n"
+                    "  (:given ((x 1)))\n"
+                    "  (:when (ignore x))\n"
+                    "  (:then (should (= x 1))))\n"))
+          (should (byte-compile-file file))
+          (delete-file file)
+          (load elc nil t)
+          (setq names (gwt-tests--defined-names before))
+          (should (= (length names) 1))
+          (setq name (car names))
+          (should (equal (ert-test-file-name (ert-get-test name)) elc))
+          (should-error (find-definition-noselect name 'ert--test)
+                        :type 'user-error))
+      (gwt-tests--delete-tests names)
+      (gwt-tests--kill-file-buffer file)
+      (gwt-tests--kill-file-buffer elc)
+      (when (file-exists-p file)
+        (delete-file file))
+      (when (file-exists-p elc)
+        (delete-file elc)))))
+
 (ert-deftest gwt-tests--find-definition-inside-wrapper ()
   "A definition inside `progn' and after whitespace is still found."
   (let* ((before (mapcar #'ert-test-name (ert-select-tests t t)))

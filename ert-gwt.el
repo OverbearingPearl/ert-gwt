@@ -66,14 +66,14 @@ Runs on `after-load-functions' so reloading produces the same names."
 
 (defun ert-gwt--source-file (&optional file)
   "Return the source file for FILE, or for the current load context.
-FILE defaults to `load-file-name', `macroexp-file-name', then the
-variable `buffer-file-name'.  A byte-compiled .elc file maps to its
-.el source when that exists."
+FILE defaults to the variable `buffer-file-name', then
+`macroexp-file-name', then `load-file-name'.  A byte-compiled .elc
+file maps to its .el source when that exists."
   (let ((file (or file
-                 load-file-name
+                 buffer-file-name
                  (and (fboundp 'macroexp-file-name)
                       (macroexp-file-name))
-                 buffer-file-name)))
+                 load-file-name)))
     (when file
       (setq file (file-truename file))
       (if (and (string-match "\\.elc\\'" file)
@@ -212,8 +212,14 @@ Signal a `user-error' when the source no longer contains the form."
          (occurrence (or (plist-get definition :occurrence) 1)))
     (unless (and file clauses)
       (user-error "No recorded source definition for %s" symbol))
-    (unless (file-readable-p file)
-      (user-error "The source file %s is missing" file))
+    (unless (and (file-readable-p file)
+                 (not (string-match "\\.elc\\'" file)))
+      (let ((load-file (plist-get definition :load-file)))
+        (if (and load-file (file-readable-p load-file))
+            (user-error
+             "The source file %s is missing; %s was loaded from %s"
+             file symbol load-file)
+          (user-error "The source file %s is missing" file))))
     (let* ((positions (ert-gwt--definition-positions file clauses))
            (position (nth (1- occurrence) positions))
            (count (length positions)))
@@ -246,7 +252,8 @@ TYPE and FILE are passed to ORIG."
       (let* ((name (ert-test-name test))
              (definition (get name 'ert-gwt--definition)))
         (when (and definition
-                   (equal (plist-get definition :file) file)
+                   (or (equal (plist-get definition :file) file)
+                       (equal (plist-get definition :load-file) file))
                    (not (equal (plist-get definition :generation) generation)))
           (ert-make-test-unbound name))))))
 
@@ -281,13 +288,20 @@ clauses do not leave old tests."
       (ert-gwt--delete-stale-tests source generation))
     result))
 
-(defun ert-gwt--advice-test-file-name (file test)
-  "Return FILE unless TEST records a source file of its own."
-  (or (and (ert-test-p test)
-           (let ((name (ert-test-name test)))
-             (and (get name 'ert-gwt--definition)
-                  (plist-get (get name 'ert-gwt--definition) :file))))
-      file))
+(defun ert-gwt--advice-test-file-name (orig test)
+  "Call ORIG for TEST, preferring a readable source file.
+A test loaded from a byte-compiled file reports its source when that
+exists, and the loaded file when it does not."
+  (let ((file (funcall orig test)))
+    (if (not (ert-test-p test))
+        file
+      (let* ((name (ert-test-name test))
+             (definition (get name 'ert-gwt--definition))
+             (source (plist-get definition :file))
+             (loaded (plist-get definition :load-file)))
+        (cond ((and source (file-readable-p source)) source)
+              ((and loaded (file-readable-p loaded)) loaded)
+              (t (or source file)))))))
 
 (defun ert-gwt-unload-function ()
   "Undo the setup done when ert-gwt was loaded."
@@ -309,7 +323,7 @@ file."
                     #'ert-gwt--advice-find-function-search)
         (advice-add 'find-definition-noselect :around
                     #'ert-gwt--advice-find-definition-noselect)
-        (advice-add 'ert-test-file-name :filter-return
+        (advice-add 'ert-test-file-name :around
                     #'ert-gwt--advice-test-file-name)
         (advice-add 'load :around #'ert-gwt--advice-load)
         (advice-add 'eval-buffer :around #'ert-gwt--advice-eval-buffer)
@@ -616,6 +630,7 @@ exact hash depends on the file and the clauses:
          (ert-make-test-unbound ',name))
        (put ',name 'ert-gwt--definition
             (list :file ,file :clauses ',clauses :occurrence ,occurrence
+                  :load-file (or load-file-name buffer-file-name)
                   :generation (or ert-gwt--reload-generation
                                   ert-gwt--generation)))
        (ert-deftest ,name ()
@@ -623,7 +638,13 @@ exact hash depends on the file and the clauses:
          (let ((ert-gwt--pre-buffers (buffer-list)))
            (unwind-protect
                ,(ert-gwt--expand-givens givens when-form thens cleanups)
-             (ert-gwt--cleanup ert-gwt--pre-buffers)))))))
+             (ert-gwt--cleanup ert-gwt--pre-buffers))))
+       (let ((test (ert-get-test ',name)))
+         (when test
+           (setf (ert-test-file-name test)
+                 (or (and ,file (file-readable-p ,file) ,file)
+                     (or load-file-name buffer-file-name ,file))))
+         ',name))))
 
 (provide 'ert-gwt)
 
