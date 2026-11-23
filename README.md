@@ -30,11 +30,17 @@ clauses.
 
 ## Features
 
-- **Content-based naming.** Test names are derived from content: a file prefix plus the first 8 hex digits of the SHA-1 hash of the clause body and the defining file's identity.
-  Blocks with identical content in the same file get `-2`, `-3` suffixes.
-  Editing a different test does not change this test's name; adding or
-  removing an identical block can still change the suffix. Same-named
-  files in different directories do not produce the same test name.
+- **Content-based naming.** Test names are a file prefix plus the first
+  8 hex digits of the SHA-1 hash of the clause body and the file's
+  project identity. The identity is the repository remote when there is
+  one, otherwise the project root's basename. Blocks with identical
+  content in the same file get `-2`, `-3` suffixes; different clauses
+  never share a suffix, even if the hash prefix collides. Editing a
+  different test does not change this test's name; adding or removing an
+  identical block can still change the suffix. Moving a test file changes
+  its name. Two checkouts of the same repository agree. Unrelated
+  projects that share a root basename and have no remote can still
+  collide; `ert-gwt-name-context-function` can supply a better identity.
 - **GWT as structure, not strings.** `:given`, `:when`, `:then` are
   syntactic clauses, not parsed text. No `.feature` files, no regex step matching.
 - **ERT-based.** Uses `ert-deftest` and `should`. Your existing ERT
@@ -43,8 +49,8 @@ clauses.
   generated symbol, so `ert-find-test-other-window`, `ert-describe-test`,
   and `ert-test-location` land on the `ert-gwt-deftest` form, including
   when the test was loaded from a byte-compiled file.
-- **Zero dependencies.** No Buttercup, Ecukes, or Cask required. One `defmacro`
-  plus a hash table for name bookkeeping.
+- **Zero dependencies.** No Buttercup, Ecukes, or Cask required. One
+  `defmacro` and a small amount of bookkeeping.
 
 ## Installation
 
@@ -128,15 +134,20 @@ the definition is omitted here for brevity):
       (ert-gwt--cleanup ert-gwt--pre-buffers))))
 ```
 
-Note: ERT's internal `should` machinery is abbreviated here for brevity; in the real expansion each clause body retains the full `should` forms the user wrote.
+Note: ERT's internal `should` machinery is abbreviated here for
+brevity; in the real expansion each clause body retains the full
+`should` forms the user wrote.
 
 The test name is derived from a hash of the test's content and its
-project-relative file identity. Adding or removing unrelated tests
-leaves it unchanged; adding or removing an identical block changes the
-`-2` / `-3` suffix. Two files with the same base name in different
-projects still get different names. The exact hash cannot be shown
-here because it includes the path; `example-<hash8>` above is a
-placeholder for `example-` followed by eight hex digits.
+project identity. The identity is the repository remote when available,
+otherwise the project root's basename, followed by the path relative to
+that root. Adding or removing unrelated tests leaves it unchanged;
+adding or removing an identical block changes the `-2` / `-3` suffix.
+Two checkouts of the same repository agree, while unrelated projects
+with different remotes get different names. Moving a test file changes
+its name, because the relative path is part of the identity. The exact
+hash cannot be shown here; `example-<hash8>` above is a placeholder for
+`example-` followed by eight hex digits.
 
 ### Finding the definition
 
@@ -145,25 +156,32 @@ The macro records the defining form on the generated symbol, so
 `ert-describe-test`, and `ert-test-location` land on the
 `ert-gwt-deftest` form rather than at the top of the file. This works
 for tests loaded from source and from byte-compiled `.elc` files. The
-finder follows definitions inside `progn`, `when`, `if` and similar
-wrappers, and reports a clear error when the source has changed or is
-missing. With a byte-compiled file it opens the corresponding `.el`
-source when that exists, and otherwise reports the `.elc` file it was
-loaded from.
+finder follows definitions inside `progn`, `when`, `if`,
+`eval-and-compile` and similar load-time wrappers, but not inside
+function bodies, and reports a clear error when the source has changed
+or is missing. With a byte-compiled file it opens the corresponding
+`.el` source when that exists, and otherwise reports the `.elc` file it
+was loaded from.
 
 `ert-gwt-defining-file-jump-mode` enables this when ert-gwt loads. It
 advises `find-function-search-for-symbol`, `find-definition-noselect`,
 `ert-test-file-name` and `ert--make-xrefs-region`; ordinary function
 definitions are left alone. Set `ert-gwt-auto-enable-jump-mode` to nil
-before loading ert-gwt if you prefer to enable the mode yourself. `ert-test-file-name` reports the readable source when it exists,
-and the loaded `.elc` when the source is gone, so ERT's file links do
-not point at a missing file.
+before loading ert-gwt if you prefer to enable the mode yourself.
 
-Reloading a file, or evaluating the same buffer again, replaces the
-test instead of allocating a `-2` suffix and leaving the old name
-behind. Changing a clause removes the old definition from the same
-file. `C-M-x` on one form replaces that form only; it does not sweep
-the rest of the file.
+`ert-gwt-auto-reload-mode` is separate and also enabled at load. It
+advises `load` and `eval-buffer` so that evaluating a file again
+replaces its tests instead of adding suffixes. Set
+`ert-gwt-auto-enable-reload-mode` to nil to manage that mode yourself.
+`ert-test-file-name` reports the readable source when it exists, and
+the loaded `.elc` when the source is gone, so ERT's file links do not
+point at a missing file.
+
+With `ert-gwt-auto-reload-mode`, reloading a file or evaluating the
+same buffer again replaces the test instead of allocating a `-2`
+suffix and leaving the old name behind. Changing a clause removes the
+old definition from the same file. `C-M-x` on one form replaces that
+form only; it does not sweep the rest of the file.
 
 Generated test names in ERT's condition text are buttons too, so the
 failure report reaches the defining form directly. The generated
@@ -195,7 +213,9 @@ Each `:then` expression is wrapped in `should` automatically.
   (:then  (account-locked-p user)))
 ```
 
-`:given` supports both `let`-style bindings and setup forms, as well as `cl-letf` place bindings: a place binding is a stub that covers the whole story; see “The standard example” below.
+`:given` supports both `let`-style bindings and setup forms, as well
+as `cl-letf` place bindings: a place binding is a stub that covers
+the whole story; see “The standard example” below.
 
 ### Clause reference
 
@@ -259,8 +279,8 @@ outcome.
    `ert-gwt` does not replace it; it extends its syntax.
 
 3. **No framework, no dependencies.**
-   One macro, one hash table, one `provide`. If you can `require`
-   something, you can use `ert-gwt`.
+   One macro, one `provide`, and a small amount of bookkeeping. If you
+   can `require` something, you can use `ert-gwt`.
 
 ## Comparison
 
