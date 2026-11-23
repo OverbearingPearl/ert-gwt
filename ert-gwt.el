@@ -48,6 +48,8 @@
 (require 'find-func)
 (require 'subr-x)
 
+;;; Test registry and project identity
+
 (defvar ert-gwt--seen (make-hash-table :test 'equal)
   "Per-file test name records.
 Keys are file truenames; values are hash tables mapping name bases to
@@ -195,6 +197,8 @@ is derived from the whole form."
         (print-escape-nonascii t))
     (prin1-to-string form)))
 
+;;; Finding a definition
+
 (defconst ert-gwt--definition-wrappers
   (list 'progn (intern "eval-and-compile") 'eval-when-compile
         'cl-eval-when
@@ -339,6 +343,8 @@ TYPE and FILE are passed to ORIG."
            (ert-gwt--find-definition symbol))
       (funcall orig symbol type file)))
 
+;;; Reloading and forgetting
+
 (defun ert-gwt--forget-definition (name)
   "Remove NAME's ERT test and recorded GWT definition."
   (when (ert-test-boundp name)
@@ -388,6 +394,8 @@ clauses do not leave old tests."
       (ert-gwt--delete-stale-tests source generation))
     result))
 
+;;; ERT output
+
 (defconst ert-gwt--xref-name-regexp
   "[[:alnum:]_@.+-]*[[:alnum:]]"
   "Regexp matching a generated test name in ERT condition text.
@@ -425,6 +433,8 @@ exists, and the loaded file when it does not."
         (cond ((and source (file-readable-p source)) source)
               ((and loaded (file-readable-p loaded)) loaded)
               (t (or source file)))))))
+
+;;; Modes
 
 (defun ert-gwt-unload-function ()
   "Undo the setup done when ert-gwt was loaded."
@@ -505,6 +515,8 @@ Set this to nil before loading ert-gwt to keep the load and
     (let ((lisp-dir (expand-file-name "lisp" dir)))
       (when (file-directory-p lisp-dir)
         (add-to-list 'load-path lisp-dir)))))
+
+;;; Expansion
 
 (defun ert-gwt--parse-clauses (clauses)
   "Parse CLAUSES into a plist with :givens, :when, :thens and :cleanups.
@@ -693,6 +705,8 @@ stored for `ert-gwt--expand-givens' to re-signal."
           (setq ert-gwt--then-notes
                 (cons ,fail-note ert-gwt--then-notes))))))))
 
+;;; Naming from clauses
+
 (defun ert-gwt--name-and-occurrence (clauses &optional occurrence)
   "Return (NAME . OCCURRENCE) for CLAUSES.
 OCCURRENCE, when non-nil, is the one-based position among identical
@@ -798,6 +812,8 @@ equal clauses in different files; `ert-gwt-name-context' is the rule
 the macro uses.  When OCCURRENCE is non-nil, use it as the suffix
 position instead of the counter in TAKEN."
   (car (ert-gwt--compute-name prefix clauses taken context occurrence)))
+
+;;; The macro
 
 (defmacro ert-gwt-deftest (&rest clauses)
   "Define a GWT-style ERT test from CLAUSES.
