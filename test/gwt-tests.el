@@ -574,6 +574,36 @@
                          (ert-gwt-name-context file-b))))
       (delete-directory base t))))
 
+(ert-deftest gwt-tests--name-context-uses-remote-identity ()
+  "Projects with the same name but different remotes stay apart."
+  (let* ((base (make-temp-file "gwt-remote-" t))
+         (proj-a (expand-file-name "a/proj" base))
+         (proj-b (expand-file-name "b/proj" base))
+         (proj-c (expand-file-name "c/proj" base))
+         (file-a (expand-file-name "test/sample.el" proj-a))
+         (file-b (expand-file-name "test/sample.el" proj-b))
+         (file-c (expand-file-name "test/sample.el" proj-c)))
+    (unwind-protect
+        (progn
+          (dolist (spec (list (cons proj-a "https://example.com/a.git")
+                              (cons proj-b "https://example.com/b.git")
+                              (cons proj-c "https://example.com/a.git")))
+            (let ((proj (car spec)))
+              (make-directory (expand-file-name ".git" proj) t)
+              (make-directory (expand-file-name "test" proj) t)
+              (with-temp-file (expand-file-name ".git/config" proj)
+                (insert "[remote \"origin\"]\n\turl = "
+                        (cdr spec) "\n"))))
+          (let ((context-a (ert-gwt-name-context file-a))
+                (context-b (ert-gwt-name-context file-b))
+                (context-c (ert-gwt-name-context file-c)))
+            (should (string-match-p
+                     "\\`proj@[0-9a-f]\\{8\\}/test/sample.el\\'"
+                     context-a))
+            (should-not (equal context-a context-b))
+            (should (equal context-a context-c))))
+      (delete-directory base t))))
+
 (ert-deftest gwt-tests--load-twice-replaces-test ()
   "Loading the same file twice keeps one test with one name."
   (let* ((before (mapcar #'ert-test-name (ert-select-tests t t)))

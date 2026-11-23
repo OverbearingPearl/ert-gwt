@@ -46,6 +46,7 @@
 (require 'cl-lib)
 (require 'ert)
 (require 'find-func)
+(require 'subr-x)
 
 (defvar ert-gwt--seen (make-hash-table :test 'equal)
   "Per-file test name counters.
@@ -91,21 +92,83 @@ Eask marker."
         (locate-dominating-file dir "Cask")
         (locate-dominating-file dir "Eask"))))
 
+(defun ert-gwt--git-config-file (root)
+  "Return the git config file for ROOT, or nil.
+ROOT may be a normal checkout or a worktree whose .git is a file."
+  (let ((dotgit (expand-file-name ".git" root)))
+    (cond
+     ((file-directory-p dotgit)
+      (let ((config (expand-file-name "config" dotgit)))
+        (and (file-readable-p config) config)))
+     ((file-readable-p dotgit)
+      (with-temp-buffer
+        (insert-file-contents dotgit)
+        (goto-char (point-min))
+        (when (looking-at "gitdir:[ \t]*\\(.+\\)")
+          (let* ((dir (expand-file-name (string-trim (match-string 1)) root))
+                 (config (expand-file-name "config" dir)))
+            (and (file-readable-p config) config))))))))
+
+(defun ert-gwt--git-remote (root)
+  "Return the first remote URL in ROOT's git config, or nil."
+  (let ((config (ert-gwt--git-config-file root)))
+    (when config
+      (with-temp-buffer
+        (insert-file-contents config)
+        (goto-char (point-min))
+        (when (re-search-forward "^\\[remote \"[^\"]+\"\\]" nil t)
+          (let ((end (save-excursion
+                       (if (re-search-forward "^\\[" nil t)
+                           (match-beginning 0)
+                         (point-max)))))
+            (when (re-search-forward
+                   "^[ \t]*url[ \t]*=[ \t]*\\(.+\\)$" end t)
+              (string-trim (match-string 1)))))))))
+
+(defun ert-gwt--hg-remote (root)
+  "Return the default path in ROOT's hgrc, or nil."
+  (let ((hgrc (expand-file-name ".hg/hgrc" root)))
+    (when (file-readable-p hgrc)
+      (with-temp-buffer
+        (insert-file-contents hgrc)
+        (goto-char (point-min))
+        (when (re-search-forward "^\\[paths\\]" nil t)
+          (let ((end (save-excursion
+                       (if (re-search-forward "^\\[" nil t)
+                           (match-beginning 0)
+                         (point-max)))))
+            (when (re-search-forward
+                   "^[ \t]*default[ \t]*=[ \t]*\\(.+\\)$" end t)
+              (string-trim (match-string 1)))))))))
+
+(defun ert-gwt--project-identity (root)
+  "Return a stable identity for the project at ROOT.
+A VCS remote separates unrelated projects that happen to share a
+directory name.  Without one, fall back to that directory name."
+  (let ((basename (file-name-nondirectory (directory-file-name root)))
+        (remote (or (ert-gwt--git-remote root)
+                    (ert-gwt--hg-remote root))))
+    (if remote
+        (format "%s@%s" basename
+                (substring (secure-hash 'sha1 remote) 0 8))
+      basename)))
+
 (defun ert-gwt-name-context (file)
   "Return the hash context for test definitions in FILE.
 The context is FILE's path relative to its project root, prefixed
-with the root's directory name.  This keeps names stable when the
-project is checked out at a different absolute path, while still
-distinguishing same-named files in different projects.  When no
-project root is found, use the parent directory name and FILE's
-base name."
+with an identity derived from that root's VCS remote.  This keeps
+names stable when the project is checked out at a different absolute
+path, while still distinguishing same-named projects with different
+remotes.  When no project root is found, use the parent directory
+name and FILE's base name.  Projects without a VCS remote fall back
+to the root's directory name."
   (if (null file)
       ""
     (let* ((true (file-truename file))
            (root (ert-gwt--project-root true)))
       (if root
           (let ((root (file-truename root)))
-            (concat (file-name-nondirectory (directory-file-name root))
+            (concat (ert-gwt--project-identity root)
                     "/"
                     (file-relative-name true root)))
         (concat (file-name-nondirectory
