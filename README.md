@@ -25,14 +25,15 @@ symbol names like:
   (:then  (login-redirects-to-home-p user)))
 ```
 
-The macro generates a unique ERT test name for you. You focus on the three
+The macro generates an ERT test name for you. You focus on the three
 clauses.
 
 ## Features
 
 - **Content-based naming.** Test names are derived from content: a file prefix plus the first 8 hex digits of the SHA-1 hash of the clause body.
   Blocks with identical content in the same file get `-2`, `-3` suffixes.
-  Editing other tests never causes this test's name to drift.
+  Editing a different test does not change this test's name; adding or
+  removing an identical block can still change the suffix.
 - **GWT as structure, not strings.** `:given`, `:when`, `:then` are
   syntactic clauses, not parsed text. No `.feature` files, no regex step matching.
 - **ERT-based.** Uses `ert-deftest` and `should`. Your existing ERT
@@ -123,7 +124,9 @@ The macroexpansion of the above example is:
 
 Note: ERT's internal `should` machinery is abbreviated here for brevity; in the real expansion each clause body retains the full `should` forms the user wrote.
 
-The test name is derived from a hash of the test's content and remains stable regardless of other tests being added or removed.
+The test name is derived from a hash of the test's content. Adding or
+removing unrelated tests leaves it unchanged; adding or removing an
+identical block changes the `-2` / `-3` suffix.
 
 
 ### Multiple `:then` clauses
@@ -225,7 +228,7 @@ outcome.
 | Natural language files | ❌ | ❌ | ✅ |
 | Built on ERT | ✅ | ❌ | ❌ |
 | Zero dependencies | ✅ | ❌ | ❌ |
-| Anonymous tests | ✅ | ❌ | ❌ |
+| Anonymous tests (no author-chosen name) | ✅ | ❌ | ❌ |
 | Spy / Mock | ❌ | ✅ | ⚠️ |
 | Nested contexts | ❌ | ✅ | ✅ |
 

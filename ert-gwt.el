@@ -25,13 +25,18 @@
 ;; and may repeat.  `:cleanup' forms run after the test, even on failure.
 ;;
 ;; Each test is named after the defining file and a hash of its clauses:
-;; <file-prefix>-<hash8>, with -2, -3, ... appended to repeated clauses.
+;; <file-prefix>-<hash8>, with -2, -3, ... appended when a file contains
+;; identical clauses more than once.  The name is ERT's symbol; it is not
+;; written into the source, so the defining form is recorded on the test
+;; symbol for `find-function'.
 ;;
-;; Setup stubs belong in `:given'.  Since each given wraps the clauses
-;; after it, a stub stays in effect through `:when' and `:then':
+;; Setup stubs belong in `:given' as place bindings:
 ;;
-;;     (:given (cl-letf (((symbol-function 'yes-or-no-p)
-;;                        (lambda (_prompt) t)))))
+;;     (:given (((symbol-function 'yes-or-no-p)
+;;                (lambda (_prompt) t))))
+;;
+;; A `cl-letf' written as a setup form is not a stub: the rebinding is
+;; undone as soon as that form finishes.
 ;;
 ;; After the user `:cleanup' forms, buffers created during the test are
 ;; killed and files made with `ert-gwt--temp-file' are deleted.
@@ -273,16 +278,17 @@ file; counters are kept per file in `ert-gwt--seen'."
     (intern (ert-gwt-name-from-clauses prefix clauses subtable))))
 
 (defun ert-gwt--defining-anchor (clauses)
-  "Return a printed representation of CLAUSES for locating the source.
+  "Return a printed representation of CLAUSES for diagnostics.
 Return nil if printing fails."
   (condition-case nil
       (prin1-to-string clauses)
     (error nil)))
 
 (defun ert-gwt-name-from-clauses (prefix clauses taken)
-  "Return a unique test name for CLAUSES under PREFIX.
-The name is PREFIX-HASH8, with -2, -3, ... appended on collisions.
-TAKEN maps name bases to use counts and is updated in place."
+  "Return a test name for CLAUSES under PREFIX.
+The name is PREFIX-HASH8, with -2, -3, ... appended on collisions
+within TAKEN.  TAKEN maps name bases to use counts and is updated in
+place."
   (let* ((hash (substring (secure-hash 'sha1 (format "%S" clauses)) 0 8))
          (base (format "%s-%s" prefix hash))
          (count (gethash base taken 0)))
@@ -305,21 +311,25 @@ CLAUSES may contain:
                              `should' unless it already asserts
   (:cleanup FORM...)         cleanup forms, run even on failure
 
-Each :given wraps the rest of the test, so stubs placed there cover
-`:when' and `:then'.  WHEN and each THEN get their own status line in
-the ERT report.  After the `:cleanup' forms, buffers and temp files
-created by the test are removed automatically.
+The place bindings in each :given wrap the rest of the test, so a stub
+written there covers `:when' and `:then'.  Setup forms run in order but
+do not wrap the later clauses.  WHEN and each THEN get their own status
+line in the ERT report.  After the `:cleanup' forms, buffers and temp
+files created by the test are removed automatically.
 
-The test name comes from the defining file and a hash of CLAUSES:
+The test name comes from the defining file and a hash of CLAUSES.  For
+the example below it is an ERT symbol such as `ert-gwt-3f2a9c1d'; the
+exact hash depends on the file and the clauses:
 
   (ert-gwt-deftest
     (:given ((file (ert-gwt--temp-file \"data.txt\"))
              (old \"old contents\")
-             (new \"new contents\"))
+             (new \"new contents\")
+             ((symbol-function \\='yes-or-no-p)
+              (lambda (_prompt) t)))
             (with-temp-file file (insert old)))
-    (:given (cl-letf (((symbol-function \\='yes-or-no-p)
-                       (lambda (_prompt) t)))))
-    (:when (with-temp-file file (insert new)))
+    (:when (when (yes-or-no-p \"Replace contents?\")
+             (with-temp-file file (insert new))))
     (:then (should (equal \"new contents\"
                           (with-temp-buffer
                             (insert-file-contents file)
