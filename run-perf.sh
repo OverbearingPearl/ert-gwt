@@ -1,7 +1,8 @@
 #!/bin/sh
 # Run the performance budgets. What is measured lives in ci/perf.el; the
-# numbers live in the :perf table of ci/config.el. Pass --report to print the
-# table without failing on it.
+# numbers live in the :perf table of ci/config.el. Without --report a budget
+# that is over fails, which is what `make perf-check' runs; `make perf' passes
+# --report and only prints the table.
 set -eu
 
 here=$(cd "$(dirname "$0")" && pwd)

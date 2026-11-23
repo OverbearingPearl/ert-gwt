@@ -26,14 +26,15 @@ and again only when a pull changes a template.
   --help         this text
 
 What it writes, and what to do with each:
-  Makefile                  make lint | test | perf | size | hooks
+  Makefile                  make lint | test | perf | perf-check | size |
+                            coverage | hooks
   .pre-commit-config.yaml   the message before it is created, lint before a
                             commit, tests before a push
   config/ci.el              the Emacs version this package claims; every other
                             knob of ci/config.el can be overridden there too
   .gitignore                compiler output, package caches, dist/ and CI
                             logs; written only when the project has none
-  .github/                  lint, test, size and perf, plus a manual
+  .github/                  lint, test, size, perf and coverage, plus a manual
                             melpazoid check
 
 Hooks are installed only when this run wrote the hook config: a project that
@@ -97,7 +98,7 @@ here_top=$(git -C "$here" rev-parse --show-toplevel 2>/dev/null || printf '')
 missing_targets() {
   file=$1
   missing=""
-  for target in lint test perf size hooks; do
+  for target in lint test perf perf-check size coverage hooks; do
     grep -q "^$target:" "$file" 2>/dev/null || missing="$missing $target"
   done
   printf '%s' "$missing"
@@ -321,8 +322,8 @@ report_changes
 cat <<'NEXT'
 
 What you can change from here:
-  config/ci.el      directories, the :perf budgets, the :size policy; nothing
-                    has to be set
+  config/ci.el      directories, the :perf budgets, the :size policy, the
+                    :coverage directories; nothing has to be set
   config/targets.mk targets of your own, including the ones `make lint' runs;
                     the Makefile itself is replaced by a pull, so nothing of
                     yours belongs in it

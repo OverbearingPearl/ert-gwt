@@ -339,9 +339,10 @@ reach for `--no-verify`, and that one habit costs more than any check it skips.
 |---|---|---|---|---|---|
 | `make lint` | yes | | yes | | |
 | `make test` | | yes | yes | | |
-| `make perf` (strict) | | | | yes | yes |
-| `make perf-report` | | | yes, uploaded as an artifact | | |
+| `make perf-check` | | | | yes | yes |
+| `make perf` | | | yes, uploaded as an artifact | | |
 | `make size` | | | yes, uploaded as an artifact | | |
+| `make coverage` | | | yes, uploaded as an artifact | | |
 | melpazoid | | | | | yes |
 | `make dist`, version tag | | | | | tag |
 
@@ -623,11 +624,13 @@ ruby -ryaml -e 'Dir[".github/**/*.yml"].each { |f| YAML.load_file(f, aliases: tr
 
 ## Performance budgets
 
-`make perf` measures the handful of substrate numbers this package's design is
-budgeted against, and fails when one goes over. The benchmarks are in
-`ci/perf.el`; the numbers are in the `:perf` table of `ci/config.el`, where
-every other policy number lives. `make perf-report` prints the same table and
-never fails, for a machine that is not quiet.
+`make perf-check` measures the handful of substrate numbers this package's
+design is budgeted against, and fails when one goes over. The benchmarks are
+in `ci/perf.el`; the numbers are in the `:perf` table of `ci/config.el`, where
+every other policy number lives. `make perf` prints the same table and never
+fails, which is the form it takes in a pull request: numbers to look at, not a
+red mark on a shared runner. The strict check is left to the nightly run,
+where a stray red mark costs nobody a merge.
 
 | benchmark | budget | why it is guarded |
 |---|---|---|
@@ -703,11 +706,71 @@ The match is on text, which the report says by being quiet: a run that is one
 idea with different names is invisible, so an empty table means nobody
 copy-pasted, not that nothing is duplicated.
 
+## Coverage
+
+`make coverage` instruments the source, runs the ERT suite in a throwaway
+Emacs, and prints what the tests reached.  The measuring is testcover-audit;
+where it looks is the `:coverage` table of `ci/config.el`, whose default is
+the same source set as `:size` -- the modules under the submodule directory
+plus the entry point at the root.  Test and vendored files are never
+instrumented.
+
+```
+coverage: ERT ran 394 tests, 2 unexpected
+coverage: 93% (covered 6410, 1value 1775, uncovered 612, total 8797)
+```
+
+The table above the totals line names each module, so a low number has an
+address.  The same data is written to `build/coverage.json`; CI uploads both
+the log and the JSON as the `coverage` artifact.
+
+The percentage is testcover-audit's: a form that always took the same value
+counts as covered, because the test did run it.  The totals line prints that
+count separately as `1value`, so a number that looks healthy while most forms
+never varied is visible in the same place as the number itself.  A report is
+not the place to hide that distinction behind one percentage.
+
+There is no budget and no stricter variant, and the pipeline treats it like
+`make perf` and `make size`: a report that is uploaded, never a check that
+fails.  The reason is stronger here than for timing.  Instrumentation changes
+what the code does -- every form gains a wrapper that records a value -- so a
+suite with timing assertions can be red under coverage and green in
+`make test`.  In the pilot run, two assertions in one package's console
+tests failed only when instrumented; both were timing budgets, not
+behaviour.  Correctness is the test job's verdict.  This job's
+verdict is that a report exists.
+
+That also means ERT failures are printed and counted but do not decide the
+exit status.  Each test runs on its own, so an assertion that escapes ERT --
+one placed in a timer or a process sentinel, which instrumentation can turn
+from a race won into a race lost -- costs that test's result and not the rest
+of the report; the reason is printed above the table.  Three things do fail
+the run, because each means there is no report rather than a bad one: a file
+that cannot be instrumented, a test file that cannot be loaded, and a scan
+that collects no coverage data at all.  A package with no test modules prints a
+skip line and exits zero, the same way `make test` does.
+
+Coverage needs interpreted code: `testcover` instruments the `.el` it reads,
+and a test that loads the `.elc` instead reaches the compiled definition and
+records nothing.  The suite's byte-compile check compiles to a temporary
+destination, so the source tree stays interpreted, but a package with its own
+build step has to keep that step out of the coverage run.  Top-level forms
+also run twice, once at instrumentation and once when a test requires the
+file; that is harmless for definitions and worth knowing for anything with a
+side effect.  Both are reasons the run happens in its own Emacs and its own
+job, not as a wrapper around `make test`.
+
+The report is deliberately broader than the gate would be: `make coverage`
+succeeds and prints, and a reader decides what the number means.  A floor
+would turn a measurement into a target, and a target into a number that gets
+padded around.
+
 ## Requirements
 
 - `emacs` on `PATH`, or `EMACS=/path/to/emacs`.
-- Network on first run only: `ci/deps.el` installs `package-lint` into
-  `.cache/elpa` unless it is already available in `~/.emacs.d/elpa`.
+- Network on first run only: `ci/deps.el` installs `package-lint` for the
+  checks and `testcover-audit` for `make coverage` into `.cache/elpa` unless
+  they are already available in `~/.emacs.d/elpa`.
 
 ## Secrets (notifications)
 

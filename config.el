@@ -150,7 +150,14 @@
            :window 4
            :large 300
            :shown 20
-           :skip ("\\`;" "\\`(require" "\\`(provide")))
+           :skip ("\\`;" "\\`(require" "\\`(provide"))
+
+    ;; Where `make coverage' instruments the code, in one table.  The same
+    ;; `:directories' spelling as `:size': `.' is the entry point at the root,
+    ;; and a directory is walked recursively.  Test and vendored files are
+    ;; never instrumented, whether or not they sit under a directory named
+    ;; here, because coverage of the tests would only say the tests ran.
+    :coverage (:directories ("lisp" ".")))
   "Project-wide policy for the check suite.")
 
 (defun p/config-load-project ()
