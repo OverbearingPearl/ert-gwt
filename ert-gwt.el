@@ -5,7 +5,7 @@
 ;; Author: OverbearingPearl <OverbearingPearl@outlook.com>
 ;; Assisted-by: DeepSeek:deepseek-v4-flash, GLM:glm-5.3-flash, Laguna:laguna-s-2.1
 ;; URL: https://github.com/OverbearingPearl/ert-gwt
-;; Version: 0.0.1
+;; Version: 1.0.0
 ;; Package-Requires: ((emacs "29.4"))
 ;; Keywords: lisp tools
 ;; SPDX-License-Identifier: GPL-3.0-or-later
