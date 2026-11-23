@@ -45,6 +45,7 @@
 
 (require 'cl-lib)
 (require 'ert)
+(require 'find-func)
 
 (defvar ert-gwt--seen (make-hash-table :test 'equal)
   "Per-file test name counters.
@@ -54,32 +55,90 @@ use counts.")
 (defun ert-gwt--seen-clear-for-load (file)
   "Discard the name counters recorded for FILE.
 Runs on `after-load-functions' so reloading produces the same names."
-  (remhash (file-truename file) ert-gwt--seen))
+  (remhash (or (ert-gwt--source-file file) (file-truename file))
+            ert-gwt--seen))
 
-(defun ert-gwt--advice-find-test-other-window (orig-fn test-name-string)
-  "Call ORIG-FN with TEST-NAME-STRING, falling back to the definition.
-If point is left at the start of the buffer, jump to the anchor
-recorded for the test, or to point-min of its defining file."
-  (let ((result (funcall orig-fn test-name-string)))
-    (when (bobp)
-      (let* ((sym (intern-soft test-name-string))
-             (file (and sym (get sym 'ert-gwt--defining-file)))
-             (anchor (and sym (get sym 'ert-gwt--defining-anchor))))
-        (when (and file (file-exists-p file))
-          (find-file-other-window file)
-          (goto-char (point-min))
-          (cond
-           ((not anchor)
-            (message "ert-gwt: no defining anchor for %s; jumping to %s at point-min (degraded)"
-                     test-name-string file))
-           ((save-excursion
-              (goto-char (point-min))
-              (search-forward anchor nil t))
-            (goto-char (match-beginning 0)))
-           (t
-            (message "ert-gwt: anchor %S for %s not found in %s; jumping to point-min (degraded)"
-                     anchor test-name-string file))))))
-    result))
+(defun ert-gwt--source-file (&optional file)
+  "Return the source file for FILE, or for the current load context.
+FILE defaults to `load-file-name', then the variable
+`buffer-file-name'.  A byte-compiled .elc file maps to its .el source
+when that exists."
+  (let ((file (or file
+                 load-file-name
+                 (and (fboundp 'macroexp-file-name)
+                      (macroexp-file-name))
+                 buffer-file-name)))
+    (when file
+      (setq file (file-truename file))
+      (if (and (string-match "\\.elc\\'" file)
+               (file-exists-p (concat (file-name-sans-extension file) ".el")))
+          (concat (file-name-sans-extension file) ".el")
+        file))))
+
+(defun ert-gwt--print-form (form)
+  "Return a stable printed representation of FORM.
+Bind the print variables that can truncate output, so a test name
+is derived from the whole form."
+  (let ((print-length nil)
+        (print-level nil)
+        (print-circle t)
+        (print-gensym t)
+        (print-escape-newlines t)
+        (print-escape-nonascii t))
+    (prin1-to-string form)))
+
+(defun ert-gwt--find-definition (symbol)
+  "Return (BUFFER . POSITION) for SYMBOL's recorded GWT definition.
+Return nil when the definition cannot be located."
+  (let* ((definition (get symbol 'ert-gwt--definition))
+         (file (plist-get definition :file))
+         (clauses (plist-get definition :clauses))
+         (occurrence (or (plist-get definition :occurrence) 1)))
+    (when (and file (file-readable-p file) clauses)
+      (condition-case nil
+          (with-current-buffer (find-file-noselect file)
+            (save-excursion
+              (save-restriction
+                (widen)
+                (with-syntax-table emacs-lisp-mode-syntax-table
+                  (goto-char (point-min))
+                  (let ((seen 0)
+                        found)
+                    (condition-case nil
+                        (while (not (eobp))
+                          (forward-comment (point-max))
+                          (if (looking-at "(ert-gwt-deftest\\_>")
+                              (let ((start (point))
+                                    (form (let ((read-eval nil))
+                                            (ignore read-eval)
+                                            (read (current-buffer)))))
+                                (when (and (consp form)
+                                           (equal (cdr form) clauses))
+                                  (setq seen (1+ seen))
+                                  (when (= seen occurrence)
+                                    (setq found start))))
+                            (forward-sexp 1)))
+                      (end-of-file nil)
+                      (error nil))
+                    (when found
+                      (cons (current-buffer) found)))))))
+        (error nil)))))
+
+(defun ert-gwt--advice-find-function-search (orig symbol type library)
+  "Call ORIG unless SYMBOL has a recorded GWT definition.
+TYPE and LIBRARY are passed to ORIG."
+  (or (and (symbolp symbol)
+           (get symbol 'ert-gwt--definition)
+           (ert-gwt--find-definition symbol))
+      (funcall orig symbol type library)))
+
+(defun ert-gwt--advice-find-definition-noselect (orig symbol type &optional file)
+  "Call ORIG unless SYMBOL has a recorded GWT definition.
+TYPE and FILE are passed to ORIG."
+  (or (and (symbolp symbol)
+           (get symbol 'ert-gwt--definition)
+           (ert-gwt--find-definition symbol))
+      (funcall orig symbol type file)))
 
 (defun ert-gwt-unload-function ()
   "Undo the setup done when ert-gwt was loaded."
@@ -90,18 +149,22 @@ recorded for the test, or to point-min of its defining file."
 ;;;###autoload
 (define-minor-mode ert-gwt-defining-file-jump-mode
   "Jump to `ert-gwt-deftest' definitions from ERT results.
-When enabled, `ert-find-test-other-window' falls back to the file and
-anchor recorded when the test was defined."
+When enabled, `find-function' uses the defining form recorded when
+the test was defined."
   :global t
   :group 'ert-gwt
   (if ert-gwt-defining-file-jump-mode
       (progn
-        (advice-add 'ert-find-test-other-window :around
-                    #'ert-gwt--advice-find-test-other-window)
+        (advice-add 'find-function-search-for-symbol :around
+                    #'ert-gwt--advice-find-function-search)
+        (advice-add 'find-definition-noselect :around
+                    #'ert-gwt--advice-find-definition-noselect)
         (add-hook 'after-load-functions #'ert-gwt--seen-clear-for-load))
     (remove-hook 'after-load-functions #'ert-gwt--seen-clear-for-load)
-    (advice-remove 'ert-find-test-other-window
-                   #'ert-gwt--advice-find-test-other-window)))
+    (advice-remove 'find-function-search-for-symbol
+                   #'ert-gwt--advice-find-function-search)
+    (advice-remove 'find-definition-noselect
+                   #'ert-gwt--advice-find-definition-noselect)))
 
 (ert-gwt-defining-file-jump-mode 1)
 
@@ -261,43 +324,46 @@ stored for `ert-gwt--expand-givens' to re-signal."
           (setq ert-gwt--then-notes
                 (cons ,fail-note ert-gwt--then-notes))))))))
 
-(defun ert-gwt--name (clauses)
-  "Return an interned test name for CLAUSES.
-The prefix is the defining file's base name, or \"test-gwt\" outside a
-file; counters are kept per file in `ert-gwt--seen'."
-  (let* ((file (if load-file-name
-                   (file-truename load-file-name)
-                 "test-gwt"))
-         (prefix (if load-file-name
-                     (file-name-base load-file-name)
-                   "test-gwt"))
-         (subtable (or (gethash file ert-gwt--seen)
-                       (puthash file
+(defun ert-gwt--name-and-occurrence (clauses)
+  "Return (NAME . OCCURRENCE) for CLAUSES.
+NAME is interned in `ert-gwt--seen'; OCCURRENCE is the one-based
+position among identical clause blocks in the defining file."
+  (let* ((file (ert-gwt--source-file))
+         (key (or file "test-gwt"))
+         (prefix (if file (file-name-base file) "test-gwt"))
+         (subtable (or (gethash key ert-gwt--seen)
+                       (puthash key
                                 (make-hash-table :test 'equal)
                                 ert-gwt--seen))))
-    (intern (ert-gwt-name-from-clauses prefix clauses subtable))))
+    (let ((result (ert-gwt--compute-name prefix clauses subtable)))
+      (cons (intern (car result)) (cdr result)))))
 
-(defun ert-gwt--defining-anchor (clauses)
-  "Return a printed representation of CLAUSES for diagnostics.
-Return nil if printing fails."
-  (condition-case nil
-      (prin1-to-string clauses)
-    (error nil)))
+(defun ert-gwt--name (clauses)
+  "Return an interned test name for CLAUSES.
+The prefix is the defining file's base name, or \"test-gwt\" when no
+source file is known; counters are kept per file in `ert-gwt--seen'."
+  (car (ert-gwt--name-and-occurrence clauses)))
 
-(defun ert-gwt-name-from-clauses (prefix clauses taken)
-  "Return a test name for CLAUSES under PREFIX.
-The name is PREFIX-HASH8, with -2, -3, ... appended on collisions
-within TAKEN.  TAKEN maps name bases to use counts and is updated in
-place."
+(defun ert-gwt--compute-name (prefix clauses taken)
+  "Return (NAME . OCCURRENCE) for CLAUSES under PREFIX.
+NAME is PREFIX-HASH8, with -2, -3, ... appended on collisions in
+TAKEN; OCCURRENCE is the one-based count for that name."
   (let* ((hash (substring (secure-hash 'sha1 (format "%S" clauses)) 0 8))
          (base (format "%s-%s" prefix hash))
          (count (gethash base taken 0)))
     (if (zerop count)
         (progn
           (puthash base 1 taken)
-          base)
+          (cons base 1))
       (puthash base (1+ count) taken)
-      (format "%s-%d" base (1+ count)))))
+      (cons (format "%s-%d" base (1+ count)) (1+ count)))))
+
+(defun ert-gwt-name-from-clauses (prefix clauses taken)
+  "Return a test name for CLAUSES under PREFIX.
+The name is PREFIX-HASH8, with -2, -3, ... appended on collisions
+within TAKEN.  TAKEN maps name bases to use counts and is updated in
+place."
+  (car (ert-gwt--compute-name prefix clauses taken)))
 
 (defmacro ert-gwt-deftest (&rest clauses)
   "Define a GWT-style ERT test from CLAUSES.
@@ -337,24 +403,23 @@ exact hash depends on the file and the clauses:
     (:cleanup (delete-file file)))"
   (declare (indent 0))
   (let* ((parsed (ert-gwt--parse-clauses clauses))
-         (name (ert-gwt--name clauses))
+         (name-info (ert-gwt--name-and-occurrence clauses))
+         (name (car name-info))
+         (occurrence (cdr name-info))
+         (file (ert-gwt--source-file))
          (givens (plist-get parsed :givens))
          (when-form (plist-get parsed :when))
          (thens (plist-get parsed :thens))
-         (cleanups (plist-get parsed :cleanups))
-         (defining-file (and load-file-name
-                             (file-truename load-file-name)))
-         (anchor (ert-gwt--defining-anchor clauses)))
-    (when defining-file
-      (put name 'ert-gwt--defining-file defining-file))
-    (when anchor
-      (put name 'ert-gwt--defining-anchor anchor))
-    `(ert-deftest ,name ()
-       "Anonymous GWT-style test defined by `ert-gwt-deftest'."
-       (let ((ert-gwt--pre-buffers (buffer-list)))
-         (unwind-protect
-             ,(ert-gwt--expand-givens givens when-form thens cleanups)
-           (ert-gwt--cleanup ert-gwt--pre-buffers))))))
+         (cleanups (plist-get parsed :cleanups)))
+    `(progn
+       (put ',name 'ert-gwt--definition
+            ',(list :file file :clauses clauses :occurrence occurrence))
+       (ert-deftest ,name ()
+         "Anonymous GWT-style test defined by `ert-gwt-deftest'."
+         (let ((ert-gwt--pre-buffers (buffer-list)))
+           (unwind-protect
+               ,(ert-gwt--expand-givens givens when-form thens cleanups)
+             (ert-gwt--cleanup ert-gwt--pre-buffers)))))))
 
 (provide 'ert-gwt)
 

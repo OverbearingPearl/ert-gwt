@@ -20,6 +20,32 @@
 
 (require 'ert-gwt)
 
+(defun gwt-tests--line-at (loc)
+  "Return the line number of LOC's position in LOC's buffer."
+  (with-current-buffer (car loc)
+    (line-number-at-pos (cdr loc))))
+
+(defun gwt-tests--defined-names (before)
+  "Return names defined since BEFORE."
+  (cl-set-difference
+   (mapcar #'ert-test-name (ert-select-tests t t))
+   before))
+
+(defun gwt-tests--delete-tests (names)
+  "Delete each ERT test named in NAMES."
+  (dolist (name names)
+    (when (ert-test-boundp name)
+      (ert-delete-test name))))
+
+(defun gwt-tests--kill-file-buffer (file)
+  "Kill any buffer visiting FILE."
+  (let ((file (file-truename file)))
+    (dolist (buf (buffer-list))
+      (when (and (buffer-live-p buf)
+                 (buffer-file-name buf)
+                 (equal (file-truename (buffer-file-name buf)) file))
+        (kill-buffer buf)))))
+
 ;;; Clause parsing
 
 (ert-deftest gwt-tests--parse-full-clauses ()
@@ -204,107 +230,138 @@
       (when (and path (file-exists-p path))
         (delete-file path)))))
 
-(ert-deftest gwt-tests--defining-anchor-serialization ()
-  (ert-info ("Normal clause list yields non-nil serialized text containing each literal")
-    (let ((clauses '("should" "return" "a cons cell")))
-      (let ((result (ert-gwt--defining-anchor clauses)))
-        (should result)
-        (should (stringp result))
-        (dolist (clause clauses)
-          (should
-           (string-match-p
-            (regexp-quote clause)
-            result))))))
-  (let ((buf (generate-new-buffer " *ert-gwt-anchor-test*")))
-    (unwind-protect
-        (ert-info ("Clause list containing a buffer object still yields a string containing the buffer name; the downgrade path only covers real print errors, not unreadable-but-printable objects")
-          (let ((result (ert-gwt--defining-anchor
-                         (list (buffer-name buf) buf))))
-            (should result)
-            (should (stringp result))
-            (should
-             (string-match-p
-              (regexp-quote (buffer-name buf))
-              result))))
-      (kill-buffer buf))))
-
-(ert-deftest gwt-tests--defining-anchor-fallback-lookup ()
-  "Jump advice finds the anchor and degrades loudly when it is missing."
-  (let* ((temp-file (make-temp-file "gwt-anchor-test-" nil ".el"))
-         (subject 'gwt-test--anchor-subject)
-         (anchor-line ";; anchor: (gwt-test--anchor-subject)")
-         (missing-anchor ";; anchor: (gwt-test--no-such-subject)")
-         (body (concat ";; preamble line\n"
-                       anchor-line "\n"
-                       "(defun gwt-test--anchor-subject () nil)\n"))
-         (no-op (lambda (&rest _args) (goto-char (point-min)))))
+(ert-deftest gwt-tests--find-definition-real-source ()
+  "A real ert-gwt-deftest form is found at its opening paren."
+  (let* ((before (mapcar #'ert-test-name (ert-select-tests t t)))
+         (file (make-temp-file "gwt-source-" nil ".el"))
+         names)
     (unwind-protect
         (progn
-          (with-temp-file temp-file
-            (insert body))
-          (put subject 'ert-gwt--defining-file temp-file)
-          ;; Anchor present.
-          (put subject 'ert-gwt--defining-anchor anchor-line)
-          (ert-info ("Anchor lookup must land point at the start of the matched anchor symbol in the opened file buffer")
-            (goto-char (point-min))
-            (funcall #'ert-gwt--advice-find-test-other-window no-op subject)
-            (should (equal (buffer-file-name) temp-file))
-            (should (looking-at
-                     (regexp-quote anchor-line)))
-            (should (equal
-                     (line-number-at-pos (point))
-                     2)))
-          ;; Anchor missing.
-          (put subject 'ert-gwt--defining-anchor missing-anchor)
-          (let ((log ""))
-            (cl-letf (((symbol-function 'message)
-                       (lambda (fmt &rest args)
-                         (setq log
-                               (concat log
-                                       (apply #'format (or fmt "nil") args)
-                                       "\n"))
-                         nil)))
-              (ert-info ("Anchor mismatch must degrade to point-min and log, not fail silently")
-                (goto-char (point-min))
-                (funcall #'ert-gwt--advice-find-test-other-window no-op subject)
-                (should (equal (buffer-file-name) temp-file))
-                (should (= (point) (point-min)))
-                (should (> (length log) 0))
-                (should (string-match-p
-                         "anchor"
-                         log)))))
-          ;; No anchor recorded.
-          (put subject 'ert-gwt--defining-anchor nil)
-          (let ((log ""))
-            (cl-letf (((symbol-function 'message)
-                       (lambda (fmt &rest args)
-                         (setq log
-                               (concat log
-                                       (apply #'format (or fmt "nil") args)
-                                       "\n"))
-                         nil)))
-              (ert-info ("Missing defining-anchor property must degrade to point-min and log the no-anchor message")
-                (goto-char (point-min))
-                (funcall #'ert-gwt--advice-find-test-other-window no-op subject)
-                (should (equal (buffer-file-name) temp-file))
-                (should (= (point) (point-min)))
-                (should (> (length log) 0))
-                (should (string-match-p
-                         "no defining anchor"
-                         log)))))
-          ;; Kill the buffer opened by the advice.
-          (dolist (buf (buffer-list))
-            (when (and (buffer-live-p buf)
-                       (equal (buffer-file-name buf) temp-file))
-              (kill-buffer buf))))
-      (dolist (buf (buffer-list))
-        (when (and (buffer-live-p buf)
-                   (equal (buffer-file-name buf) temp-file))
-          (kill-buffer buf)))
-      ;; Do not let a failed deletion mask the test result.
-      (condition-case _err
-          (delete-file temp-file)
-        (error nil)))))
+          (with-temp-file file
+            (insert ";;; gwt-source.el --- test -*- lexical-binding: t; -*-\n")
+            (insert "(require 'ert-gwt)\n\n")
+            (insert ";; A comment before the form.\n")
+            (insert "(ert-gwt-deftest\n"
+                    "  (:given ((x 1)))\n"
+                    "  (:when (ignore x))\n"
+                    "  (:then (should (= x 1))))\n"))
+          (load file nil t)
+          (setq names (gwt-tests--defined-names before))
+          (should (= (length names) 1))
+          (let* ((name (car names))
+                 (loc (find-definition-noselect name 'ert--test)))
+            (ert-info ("The defining file is the source file")
+              (should (equal (file-truename (buffer-file-name (car loc)))
+                             (file-truename file))))
+            (ert-info ("Point lands on the opening paren, not point-min")
+              (should (= (gwt-tests--line-at loc) 5))
+              (with-current-buffer (car loc)
+                (goto-char (cdr loc))
+                (should (looking-at-p "(ert-gwt-deftest"))))
+            (ert-info ("ert-test-location reports the same line")
+              (should (string-match-p
+                       ":5\\'"
+                       (ert-test-location (ert-get-test name)))))
+            (ert-info ("The direct find-function entry point agrees")
+              (should (equal (find-function-search-for-symbol name nil file)
+                             loc)))
+            (ert-info ("ert-find-test-other-window uses the same finder")
+              (ert-find-test-other-window name)
+              (with-current-buffer (window-buffer (selected-window))
+                (should (= (line-number-at-pos (point)) 5))
+                (should (looking-at-p "(ert-gwt-deftest"))))))
+      (gwt-tests--delete-tests names)
+      (gwt-tests--kill-file-buffer file)
+      (when (file-exists-p file)
+        (delete-file file)))))
+
+(ert-deftest gwt-tests--find-definition-duplicate-clauses ()
+  "Two identical blocks get distinct names and their own source lines."
+  (let* ((before (mapcar #'ert-test-name (ert-select-tests t t)))
+         (file (make-temp-file "gwt-source-" nil ".el"))
+         names)
+    (unwind-protect
+        (progn
+          (with-temp-file file
+            (insert ";;; gwt-source.el --- test -*- lexical-binding: t; -*-\n")
+            (insert "(require 'ert-gwt)\n\n")
+            (insert "(ert-gwt-deftest\n"
+                    "  (:given ((x 1)))\n"
+                    "  (:when (ignore x))\n"
+                    "  (:then (should (= x 1))))\n\n"
+                    "(ert-gwt-deftest\n"
+                    "  (:given ((x 1)))\n"
+                    "  (:when (ignore x))\n"
+                    "  (:then (should (= x 1))))\n"))
+          (load file nil t)
+          (setq names (gwt-tests--defined-names before))
+          (should (= (length names) 2))
+          (should-not (equal (nth 0 names) (nth 1 names)))
+          (let ((lines
+                 (mapcar
+                  (lambda (name)
+                    (let ((loc (find-definition-noselect name 'ert--test)))
+                      (gwt-tests--line-at loc)))
+                  names)))
+            (should (equal (sort lines #'<) '(4 9))))
+          (dolist (name names)
+            (let ((definition (get name 'ert-gwt--definition)))
+              (should (equal (plist-get definition :file)
+                             (file-truename file)))
+              (should (memql (plist-get definition :occurrence) '(1 2))))))
+      (gwt-tests--delete-tests names)
+      (gwt-tests--kill-file-buffer file)
+      (when (file-exists-p file)
+        (delete-file file)))))
+
+(ert-deftest gwt-tests--find-definition-byte-compiled ()
+  "A test loaded from .elc still points at the .el form."
+  (let* ((before (mapcar #'ert-test-name (ert-select-tests t t)))
+         (file (make-temp-file "gwt-compiled-" nil ".el"))
+         (elc (concat (file-name-sans-extension file) ".elc"))
+         names)
+    (unwind-protect
+        (progn
+          (with-temp-file file
+            (insert ";;; gwt-compiled.el --- test -*- lexical-binding: t; -*-\n")
+            (insert "(require 'ert-gwt)\n\n")
+            (insert "(ert-gwt-deftest\n"
+                    "  (:given ((x 1)))\n"
+                    "  (:when (ignore x))\n"
+                    "  (:then (should (= x 1))))\n"))
+          (should (byte-compile-file file))
+          (load elc nil t)
+          (setq names (gwt-tests--defined-names before))
+          (should (= (length names) 1))
+          (let* ((name (car names))
+                 (definition (get name 'ert-gwt--definition))
+                 (loc (find-definition-noselect name 'ert--test)))
+            (ert-info ("The compiled name uses the source file, not test-gwt")
+              (should-not (string-prefix-p "test-gwt" (symbol-name name)))
+              (should (string-prefix-p
+                       (file-name-base file)
+                       (symbol-name name))))
+            (ert-info ("The recorded file is the .el source")
+              (should (equal (plist-get definition :file)
+                             (file-truename file))))
+            (ert-info ("Finding the .elc test opens the .el form")
+              (should (equal (file-truename (buffer-file-name (car loc)))
+                             (file-truename file)))
+              (should (= (gwt-tests--line-at loc) 4)))))
+      (gwt-tests--delete-tests names)
+      (gwt-tests--kill-file-buffer file)
+      (dolist (path (list file elc))
+        (when (file-exists-p path)
+          (delete-file path))))))
+
+(ert-deftest gwt-tests--find-definition-passes-through ()
+  "The `find-function` advice leaves ordinary functions alone."
+  (let ((loc (find-definition-noselect 'ert-gwt--parse-clauses nil)))
+    (should loc)
+    (should (integer-or-marker-p (cdr loc)))
+    (should (equal (file-truename (buffer-file-name (car loc)))
+                   (file-truename
+                    (symbol-file 'ert-gwt--parse-clauses 'defun))))))
 
 (ert-deftest gwt-tests--cleanup ()
   "`ert-gwt--cleanup' kills new buffers, deletes tracked files and resets the list."
@@ -329,8 +386,9 @@
 
 (ert-deftest gwt-tests--name-and-cleanup-branches ()
   "Check name fallbacks, duplicate suffixes and directory cleanup."
-  (ert-info ("ert-gwt--name: load-file-name nil falls back to the \"test-gwt\" prefix")
-    (let (load-file-name)
+  (ert-info ("ert-gwt--name: no source file falls back to the \"test-gwt\" prefix")
+    (let (load-file-name
+          (buffer-file-name nil))
       (should (string-prefix-p "test-gwt"
                                (symbol-name (ert-gwt--name '((:when t))))))))
   (ert-info ("ert-gwt-name-from-clauses: duplicate clause name gets a numeric suffix")

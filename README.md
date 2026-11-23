@@ -38,6 +38,10 @@ clauses.
   syntactic clauses, not parsed text. No `.feature` files, no regex step matching.
 - **ERT-based.** Uses `ert-deftest` and `should`. Your existing ERT
   filters, batch runners, and CI integrations keep working.
+- **Definitions stay findable.** The defining form is recorded on the
+  generated symbol, so `ert-find-test-other-window`, `ert-describe-test`,
+  and `ert-test-location` land on the `ert-gwt-deftest` form, including
+  when the test was loaded from a byte-compiled file.
 - **Zero dependencies.** No Buttercup, Ecukes, or Cask required. One `defmacro`
   plus a hash table for name bookkeeping.
 
@@ -72,7 +76,8 @@ Put `ert-gwt.el` on your `load-path`:
   (:then (login-redirects-to-home-p user)))
 ```
 
-The macroexpansion of the above example is:
+The macroexpansion of the above example is (the `put` form that records
+the definition is omitted here for brevity):
 
 ```elisp
 (ert-deftest ert-gwt-3f2a9c1d ()
@@ -127,6 +132,20 @@ Note: ERT's internal `should` machinery is abbreviated here for brevity; in the 
 The test name is derived from a hash of the test's content. Adding or
 removing unrelated tests leaves it unchanged; adding or removing an
 identical block changes the `-2` / `-3` suffix.
+
+### Finding the definition
+
+The macro records the defining form on the generated symbol, so
+`ert-find-test-other-window` (`.` in an ERT results buffer),
+`ert-describe-test`, and `ert-test-location` land on the
+`ert-gwt-deftest` form rather than at the top of the file. This works
+for tests loaded from source and from byte-compiled `.elc` files; the
+byte-compiled case opens the corresponding `.el` source.
+
+`ert-gwt-defining-file-jump-mode` enables this when ert-gwt loads. It
+advises `find-function-search-for-symbol` and
+`find-definition-noselect`; ordinary function definitions are left
+alone.
 
 
 ### Multiple `:then` clauses
