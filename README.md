@@ -81,7 +81,7 @@ The macroexpansion of the above example is (the `put` form that records
 the definition is omitted here for brevity):
 
 ```elisp
-(ert-deftest ert-gwt-3f2a9c1d ()
+(ert-deftest example-<hash8> ()
   (let ((ert-gwt--pre-buffers (buffer-list)))
     (unwind-protect
         (progn
@@ -130,11 +130,13 @@ the definition is omitted here for brevity):
 
 Note: ERT's internal `should` machinery is abbreviated here for brevity; in the real expansion each clause body retains the full `should` forms the user wrote.
 
-The test name is derived from a hash of the test's content and file
-identity. Adding or removing unrelated tests leaves it unchanged;
-adding or removing an identical block changes the `-2` / `-3` suffix.
-Two files with the same base name but different paths still get
-different names.
+The test name is derived from a hash of the test's content and its
+project-relative file identity. Adding or removing unrelated tests
+leaves it unchanged; adding or removing an identical block changes the
+`-2` / `-3` suffix. Two files with the same base name in different
+projects still get different names. The exact hash cannot be shown
+here because it includes the path; `example-<hash8>` above is a
+placeholder for `example-` followed by eight hex digits.
 
 ### Finding the definition
 
@@ -142,20 +144,31 @@ The macro records the defining form on the generated symbol, so
 `ert-find-test-other-window` (`.` in an ERT results buffer),
 `ert-describe-test`, and `ert-test-location` land on the
 `ert-gwt-deftest` form rather than at the top of the file. This works
-for tests loaded from source and from byte-compiled `.elc` files; the
-byte-compiled case opens the corresponding `.el` source.
+for tests loaded from source and from byte-compiled `.elc` files. The
+finder follows definitions inside `progn`, `when`, `if` and similar
+wrappers, and reports a clear error when the source has changed or is
+missing. With a byte-compiled file it opens the corresponding `.el`
+source when that exists, and otherwise reports the `.elc` file it was
+loaded from.
 
 `ert-gwt-defining-file-jump-mode` enables this when ert-gwt loads. It
-advises `find-function-search-for-symbol` and
-`find-definition-noselect`; ordinary function definitions are left
-alone. `ert-test-file-name` returns the `.el` source for a test loaded
-from `.elc`, so ERT's own file links agree with the finder.
+advises `find-function-search-for-symbol`, `find-definition-noselect`
+and `ert-test-file-name`; ordinary function definitions are left
+alone. `ert-test-file-name` reports the readable source when it exists,
+and the loaded `.elc` when the source is gone, so ERT's file links do
+not point at a missing file.
 
-Two limits remain. Evaluating the same buffer twice gives the second
-run a `-2` suffix and leaves the first test registered; reload the file
-or delete the stale test if that matters. ERT's condition-text buttons
-still only turn function definitions into links; the test-name button
-and `ert-describe-test` are the supported ways to reach a GWT form.
+Reloading a file, or evaluating the same buffer again, replaces the
+test instead of allocating a `-2` suffix and leaving the old name
+behind. Changing a clause removes the old definition from the same
+file. `C-M-x` on one form replaces that form only; it does not sweep
+the rest of the file.
+
+One limit remains. ERT's condition-text buttons still only turn
+function definitions into links; the test-name button and
+`ert-describe-test` are the supported ways to reach a GWT form. The
+generated docstring lists the GIVEN, WHEN and THEN clauses, so
+`ert-describe-test` is useful without opening the source.
 
 
 ### Multiple `:then` clauses

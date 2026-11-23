@@ -618,9 +618,10 @@ do not wrap the later clauses.  WHEN and each THEN get their own status
 line in the ERT report.  After the `:cleanup' forms, buffers and temp
 files created by the test are removed automatically.
 
-The test name comes from the defining file and a hash of CLAUSES.  For
-the example below it is an ERT symbol such as `ert-gwt-3f2a9c1d'; the
-exact hash depends on the file and the clauses:
+The test name is the defining file's base name, a hyphen, and eight
+hex digits of a hash of the project-relative path and CLAUSES.  The
+hash cannot be shown here because it includes the path; in a file named
+`example.el' the symbol has the form `example-<hash8>'.
 
   (ert-gwt-deftest
     (:given ((file (ert-gwt--temp-file \"data.txt\"))
