@@ -378,6 +378,13 @@ clauses do not leave old tests."
       (ert-gwt--delete-stale-tests source generation))
     result))
 
+(defconst ert-gwt--xref-name-regexp
+  "[[:alnum:]_@.+-]*[[:alnum:]]"
+  "Regexp matching a generated test name in ERT condition text.
+The final alphanumeric character keeps a sentence period or comma out
+of the match, while the earlier characters allow names derived from
+files such as `foo.bar-tests.el'.")
+
 (defun ert-gwt--advice-make-xrefs-region (orig begin end)
   "Call ORIG, then link GWT test names between BEGIN and END.
 ERT only links names that have a `defun' definition; generated tests
@@ -385,7 +392,7 @@ have only an `ert--test' definition, so they are skipped otherwise."
   (funcall orig begin end)
   (save-excursion
     (goto-char begin)
-    (while (re-search-forward "\\(?:\\sw\\|\\s_\\)+" end t)
+    (while (re-search-forward ert-gwt--xref-name-regexp end t)
       (let* ((start (match-beginning 0))
              (symbol (intern-soft (match-string-no-properties 0)))
              (definition (and symbol (get symbol 'ert-gwt--definition)))

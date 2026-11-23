@@ -213,6 +213,25 @@
       (when (and name (ert-test-boundp name))
         (ert-delete-test name)))))
 
+(ert-deftest gwt-tests--xrefs-accept-punctuation-in-names ()
+  "A generated name with dots and pluses is linked, without the period."
+  (let* ((name (intern "gwt.sample+one-1234abcd"))
+         (file (symbol-file 'gwt-tests--xrefs-accept-punctuation-in-names
+                            'ert--test)))
+    (unwind-protect
+        (progn
+          (put name 'ert-gwt--definition (list :file file))
+          (with-temp-buffer
+            (insert "The test " (symbol-name name) ". It failed")
+            (ert--make-xrefs-region (point-min) (point-max))
+            (goto-char (point-min))
+            (search-forward (symbol-name name))
+            (let ((button (button-at (match-beginning 0))))
+              (should button)
+              (should (equal (button-get button 'help-args)
+                             (list name file))))))
+      (put name 'ert-gwt--definition nil))))
+
 (ert-deftest gwt-tests--expand-givens-nesting ()
   "Check the body structure produced by `ert-gwt--expand-givens'."
   (let ((expanded (ert-gwt--expand-givens
