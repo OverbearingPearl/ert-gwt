@@ -30,10 +30,11 @@ clauses.
 
 ## Features
 
-- **Content-based naming.** Test names are derived from content: a file prefix plus the first 8 hex digits of the SHA-1 hash of the clause body.
+- **Content-based naming.** Test names are derived from content: a file prefix plus the first 8 hex digits of the SHA-1 hash of the clause body and the defining file's identity.
   Blocks with identical content in the same file get `-2`, `-3` suffixes.
   Editing a different test does not change this test's name; adding or
-  removing an identical block can still change the suffix.
+  removing an identical block can still change the suffix. Same-named
+  files in different directories do not produce the same test name.
 - **GWT as structure, not strings.** `:given`, `:when`, `:then` are
   syntactic clauses, not parsed text. No `.feature` files, no regex step matching.
 - **ERT-based.** Uses `ert-deftest` and `should`. Your existing ERT
@@ -129,9 +130,11 @@ the definition is omitted here for brevity):
 
 Note: ERT's internal `should` machinery is abbreviated here for brevity; in the real expansion each clause body retains the full `should` forms the user wrote.
 
-The test name is derived from a hash of the test's content. Adding or
-removing unrelated tests leaves it unchanged; adding or removing an
-identical block changes the `-2` / `-3` suffix.
+The test name is derived from a hash of the test's content and file
+identity. Adding or removing unrelated tests leaves it unchanged;
+adding or removing an identical block changes the `-2` / `-3` suffix.
+Two files with the same base name but different paths still get
+different names.
 
 ### Finding the definition
 

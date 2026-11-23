@@ -24,11 +24,11 @@
 ;; under test and is required.  `:then' forms are wrapped in `should'
 ;; and may repeat.  `:cleanup' forms run after the test, even on failure.
 ;;
-;; Each test is named after the defining file and a hash of its clauses:
-;; <file-prefix>-<hash8>, with -2, -3, ... appended when a file contains
-;; identical clauses more than once.  The name is ERT's symbol; it is not
-;; written into the source, so the defining form is recorded on the test
-;; symbol for `find-function'.
+;; Each test is named after the defining file and a hash of its clauses
+;; and file identity: <file-prefix>-<hash8>, with -2, -3, ... appended
+;; when a file contains identical clauses more than once.  The name is
+;; ERT's symbol; it is not written into the source, so the defining form
+;; is recorded on the test symbol for `find-function'.
 ;;
 ;; Setup stubs belong in `:given' as place bindings:
 ;;
@@ -335,7 +335,8 @@ position among identical clause blocks in the defining file."
                        (puthash key
                                 (make-hash-table :test 'equal)
                                 ert-gwt--seen))))
-    (let ((result (ert-gwt--compute-name prefix clauses subtable)))
+    (let ((result (ert-gwt--compute-name
+                   prefix clauses subtable (or file ""))))
       (cons (intern (car result)) (cdr result)))))
 
 (defun ert-gwt--name (clauses)
@@ -344,11 +345,18 @@ The prefix is the defining file's base name, or \"test-gwt\" when no
 source file is known; counters are kept per file in `ert-gwt--seen'."
   (car (ert-gwt--name-and-occurrence clauses)))
 
-(defun ert-gwt--compute-name (prefix clauses taken)
+(defun ert-gwt--compute-name (prefix clauses taken &optional context)
   "Return (NAME . OCCURRENCE) for CLAUSES under PREFIX.
 NAME is PREFIX-HASH8, with -2, -3, ... appended on collisions in
-TAKEN; OCCURRENCE is the one-based count for that name."
-  (let* ((hash (substring (secure-hash 'sha1 (format "%S" clauses)) 0 8))
+TAKEN; OCCURRENCE is the one-based count for that name.  CONTEXT is
+mixed into the hash so equal clauses in different files differ."
+  (let* ((hash
+          (substring
+           (secure-hash 'sha1
+                        (concat (or context "")
+                                "\0"
+                                (ert-gwt--print-form clauses)))
+           0 8))
          (base (format "%s-%s" prefix hash))
          (count (gethash base taken 0)))
     (if (zerop count)
@@ -358,12 +366,13 @@ TAKEN; OCCURRENCE is the one-based count for that name."
       (puthash base (1+ count) taken)
       (cons (format "%s-%d" base (1+ count)) (1+ count)))))
 
-(defun ert-gwt-name-from-clauses (prefix clauses taken)
+(defun ert-gwt-name-from-clauses (prefix clauses taken &optional context)
   "Return a test name for CLAUSES under PREFIX.
 The name is PREFIX-HASH8, with -2, -3, ... appended on collisions
 within TAKEN.  TAKEN maps name bases to use counts and is updated in
-place."
-  (car (ert-gwt--compute-name prefix clauses taken)))
+place.  CONTEXT, when non-nil, separates equal clauses in different
+files, so callers should pass the defining file's truename."
+  (car (ert-gwt--compute-name prefix clauses taken context)))
 
 (defmacro ert-gwt-deftest (&rest clauses)
   "Define a GWT-style ERT test from CLAUSES.

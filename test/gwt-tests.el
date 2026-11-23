@@ -363,6 +363,53 @@
                    (file-truename
                     (symbol-file 'ert-gwt--parse-clauses 'defun))))))
 
+(ert-deftest gwt-tests--name-ignores-print-variables ()
+  "The name hash covers the whole form, not a truncated print."
+  (let ((clauses '((:given ((x 1 2 3 4 5))) (:when (ignore x)))))
+    (let ((one (make-hash-table :test #'equal))
+          (two (make-hash-table :test #'equal)))
+      (should
+       (equal
+        (let ((print-length nil) (print-level nil))
+          (ert-gwt-name-from-clauses "print" clauses one))
+        (let ((print-length 2) (print-level 1))
+          (ert-gwt-name-from-clauses "print" clauses two)))))))
+
+(ert-deftest gwt-tests--name-separates-files-with-the-same-base ()
+  "Equal clauses in same-named files get different names."
+  (let* ((dir-a (make-temp-file "gwt-a-" t))
+         (dir-b (make-temp-file "gwt-b-" t))
+         (file-a (expand-file-name "same-test.el" dir-a))
+         (file-b (expand-file-name "same-test.el" dir-b))
+         (body (concat ";;; same-test.el --- test -*- lexical-binding: t; -*-\n"
+                       "(require 'ert-gwt)\n\n"
+                       "(ert-gwt-deftest\n"
+                       "  (:given ((x 1)))\n"
+                       "  (:when (ignore x))\n"
+                       "  (:then (should (= x 1))))\n"
+                       "(provide 'same-test)\n"))
+         (before (mapcar #'ert-test-name (ert-select-tests t t)))
+         names)
+    (unwind-protect
+        (progn
+          (with-temp-file file-a (insert body))
+          (with-temp-file file-b (insert body))
+          (load file-a nil t)
+          (load file-b nil t)
+          (setq names
+                (cl-set-difference
+                 (mapcar #'ert-test-name (ert-select-tests t t))
+                 before))
+          (should (= (length names) 2))
+          (should-not (equal (nth 0 names) (nth 1 names)))
+          (dolist (name names)
+            (should (string-prefix-p "same-test-" (symbol-name name)))))
+      (gwt-tests--delete-tests names)
+      (gwt-tests--kill-file-buffer file-a)
+      (gwt-tests--kill-file-buffer file-b)
+      (delete-directory dir-a t)
+      (delete-directory dir-b t))))
+
 (ert-deftest gwt-tests--cleanup ()
   "`ert-gwt--cleanup' kills new buffers, deletes tracked files and resets the list."
   (let* ((pre-buffers (buffer-list))
