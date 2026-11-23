@@ -107,6 +107,12 @@ ROOT may be a normal checkout or a worktree whose .git is a file."
         (goto-char (point-min))
         (when (looking-at "gitdir:[ \t]*\\(.+\\)")
           (let* ((dir (expand-file-name (string-trim (match-string 1)) root))
+                 (common (expand-file-name "commondir" dir))
+                 (dir (if (file-readable-p common)
+                          (with-temp-buffer
+                            (insert-file-contents common)
+                            (expand-file-name (string-trim (buffer-string)) dir))
+                        dir))
                  (config (expand-file-name "config" dir)))
             (and (file-readable-p config) config))))))))
 
