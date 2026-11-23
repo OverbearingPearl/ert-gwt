@@ -52,6 +52,12 @@
 Keys are file truenames; values are hash tables mapping name bases to
 use counts.")
 
+(defvar ert-gwt--generation 0
+  "Generation number for the most recent definition pass.")
+
+(defvar ert-gwt--reload-generation nil
+  "Generation bound while a file is being loaded or evaluated.")
+
 (defun ert-gwt--seen-clear-for-load (file)
   "Discard the name counters recorded for FILE.
 Runs on `after-load-functions' so reloading produces the same names."
@@ -119,6 +125,44 @@ is derived from the whole form."
         (print-escape-nonascii t))
     (prin1-to-string form)))
 
+(defun ert-gwt--count-definitions (form clauses)
+  "Count `ert-gwt-deftest' forms in FORM whose clauses equal CLAUSES."
+  (cond
+   ((not (consp form)) 0)
+   ((memq (car form) '(quote function)) 0)
+   ((and (eq (car form) 'ert-gwt-deftest)
+         (equal (cdr form) clauses))
+    1)
+   (t
+    (let ((count 0))
+      (dolist (part form)
+        (setq count (+ count (ert-gwt--count-definitions part clauses))))
+      count))))
+
+(defun ert-gwt--source-occurrence (clauses)
+  "Return the one-based occurrence of CLAUSES before point.
+Count definitions in the current Emacs Lisp source buffer from the
+beginning through the form currently being expanded.  Return nil when
+the current buffer is not a source file, as during `load'."
+  (when (and buffer-file-name
+             (derived-mode-p 'emacs-lisp-mode))
+    (let ((limit (point))
+          (count 0))
+      (save-excursion
+        (goto-char (point-min))
+        (condition-case nil
+            (while (< (point) limit)
+              (forward-comment (point-max))
+              (when (< (point) limit)
+                (let ((read-eval nil))
+                  (ignore read-eval)
+                  (setq count (+ count
+                                 (ert-gwt--count-definitions
+                                  (read (current-buffer)) clauses))))))
+          (end-of-file nil)
+          (error nil)))
+      (when (> count 0) count))))
+
 (defun ert-gwt--find-definition (symbol)
   "Return (BUFFER . POSITION) for SYMBOL's recorded GWT definition.
 Return nil when the definition cannot be located."
@@ -172,6 +216,48 @@ TYPE and FILE are passed to ORIG."
            (ert-gwt--find-definition symbol))
       (funcall orig symbol type file)))
 
+(defun ert-gwt--delete-stale-tests (file generation)
+  "Delete from FILE any test definition older than GENERATION."
+  (let ((file (file-truename file)))
+    (dolist (test (ert-select-tests t t))
+      (let* ((name (ert-test-name test))
+             (definition (get name 'ert-gwt--definition)))
+        (when (and definition
+                   (equal (plist-get definition :file) file)
+                   (not (equal (plist-get definition :generation) generation)))
+          (ert-make-test-unbound name))))))
+
+(defun ert-gwt--advice-load (orig file &rest args)
+  "Load FILE, dropping definitions that are no longer present.
+ORIG and ARGS are the original `load' call.  The generation is
+incremented so old tests from the same file can be recognized even
+when their clauses changed the name."
+  (let* ((source (and file (ert-gwt--source-file file)))
+         (generation (1+ ert-gwt--generation))
+         (ert-gwt--reload-generation generation)
+         (result (apply orig file args)))
+    (setq ert-gwt--generation generation)
+    (when source
+      (ert-gwt--delete-stale-tests source generation))
+    result))
+
+(defun ert-gwt--advice-eval-buffer
+    (orig &optional buffer printflag filename unibyte do-allow-print)
+  "Evaluate BUFFER, dropping definitions that are no longer present.
+ORIG, PRINTFLAG, FILENAME, UNIBYTE and DO-ALLOW-PRINT are passed
+through.  A full buffer evaluation is treated like a load, so changed
+clauses do not leave old tests."
+  (let* ((target (or (and buffer (get-buffer buffer)) (current-buffer)))
+         (file (or filename (buffer-file-name target)))
+         (source (and file (ert-gwt--source-file file)))
+         (generation (1+ ert-gwt--generation))
+         (ert-gwt--reload-generation generation)
+         (result (funcall orig buffer printflag filename unibyte do-allow-print)))
+    (setq ert-gwt--generation generation)
+    (when source
+      (ert-gwt--delete-stale-tests source generation))
+    result))
+
 (defun ert-gwt--advice-test-file-name (file test)
   "Return FILE unless TEST records a source file of its own."
   (or (and (ert-test-p test)
@@ -202,6 +288,8 @@ file."
                     #'ert-gwt--advice-find-definition-noselect)
         (advice-add 'ert-test-file-name :filter-return
                     #'ert-gwt--advice-test-file-name)
+        (advice-add 'load :around #'ert-gwt--advice-load)
+        (advice-add 'eval-buffer :around #'ert-gwt--advice-eval-buffer)
         (add-hook 'after-load-functions #'ert-gwt--seen-clear-for-load))
     (remove-hook 'after-load-functions #'ert-gwt--seen-clear-for-load)
     (advice-remove 'find-function-search-for-symbol
@@ -209,7 +297,9 @@ file."
     (advice-remove 'find-definition-noselect
                    #'ert-gwt--advice-find-definition-noselect)
     (advice-remove 'ert-test-file-name
-                   #'ert-gwt--advice-test-file-name)))
+                   #'ert-gwt--advice-test-file-name)
+    (advice-remove 'load #'ert-gwt--advice-load)
+    (advice-remove 'eval-buffer #'ert-gwt--advice-eval-buffer)))
 
 (ert-gwt-defining-file-jump-mode 1)
 
@@ -385,10 +475,12 @@ stored for `ert-gwt--expand-givens' to re-signal."
           (setq ert-gwt--then-notes
                 (cons ,fail-note ert-gwt--then-notes))))))))
 
-(defun ert-gwt--name-and-occurrence (clauses)
+(defun ert-gwt--name-and-occurrence (clauses &optional occurrence)
   "Return (NAME . OCCURRENCE) for CLAUSES.
-NAME is interned in `ert-gwt--seen'; OCCURRENCE is the one-based
-position among identical clause blocks in the defining file."
+OCCURRENCE, when non-nil, is the one-based position among identical
+clause blocks in the defining file.  Without it, a per-file counter
+supplies the position.  NAME is interned globally; the counter lives
+in `ert-gwt--seen'."
   (let* ((file (ert-gwt--source-file))
          (key (or file "test-gwt"))
          (prefix (if file (file-name-base file) "test-gwt"))
@@ -398,7 +490,8 @@ position among identical clause blocks in the defining file."
                                 ert-gwt--seen))))
     (let ((result (ert-gwt--compute-name
                    prefix clauses subtable
-                   (funcall ert-gwt-name-context-function file))))
+                   (funcall ert-gwt-name-context-function file)
+                   occurrence)))
       (cons (intern (car result)) (cdr result)))))
 
 (defun ert-gwt--name (clauses)
@@ -407,11 +500,14 @@ The prefix is the defining file's base name, or \"test-gwt\" when no
 source file is known; counters are kept per file in `ert-gwt--seen'."
   (car (ert-gwt--name-and-occurrence clauses)))
 
-(defun ert-gwt--compute-name (prefix clauses taken &optional context)
+(defun ert-gwt--compute-name (prefix clauses taken &optional context occurrence)
   "Return (NAME . OCCURRENCE) for CLAUSES under PREFIX.
 NAME is PREFIX-HASH8, with -2, -3, ... appended on collisions in
 TAKEN; OCCURRENCE is the one-based count for that name.  CONTEXT is
-mixed into the hash so equal clauses in different files differ."
+mixed into the hash so equal clauses in different files differ.
+When OCCURRENCE is non-nil, use it instead of the counter in TAKEN;
+the counter is still advanced so a later counter-based call does not
+reuse the same suffix."
   (let* ((hash
           (substring
            (secure-hash 'sha1
@@ -421,20 +517,29 @@ mixed into the hash so equal clauses in different files differ."
            0 8))
          (base (format "%s-%s" prefix hash))
          (count (gethash base taken 0)))
-    (if (zerop count)
-        (progn
-          (puthash base 1 taken)
-          (cons base 1))
-      (puthash base (1+ count) taken)
-      (cons (format "%s-%d" base (1+ count)) (1+ count)))))
+    (if occurrence
+        (let ((count (max occurrence count)))
+          (puthash base count taken)
+          (cons (if (= occurrence 1)
+                    base
+                  (format "%s-%d" base occurrence))
+                occurrence))
+      (if (zerop count)
+          (progn
+            (puthash base 1 taken)
+            (cons base 1))
+        (puthash base (1+ count) taken)
+        (cons (format "%s-%d" base (1+ count)) (1+ count))))))
 
-(defun ert-gwt-name-from-clauses (prefix clauses taken &optional context)
+(defun ert-gwt-name-from-clauses (prefix clauses taken &optional context occurrence)
   "Return a test name for CLAUSES under PREFIX.
 The name is PREFIX-HASH8, with -2, -3, ... appended on collisions
 within TAKEN.  TAKEN maps name bases to use counts and is updated in
 place.  CONTEXT, when non-nil, separates equal clauses in different
-files, so callers should pass the defining file's truename."
-  (car (ert-gwt--compute-name prefix clauses taken context)))
+files; `ert-gwt-name-context' is the rule the macro uses.  When
+OCCURRENCE is non-nil, use it as the suffix position instead of the
+counter in TAKEN."
+  (car (ert-gwt--compute-name prefix clauses taken context occurrence)))
 
 (defmacro ert-gwt-deftest (&rest clauses)
   "Define a GWT-style ERT test from CLAUSES.
@@ -474,7 +579,8 @@ exact hash depends on the file and the clauses:
     (:cleanup (delete-file file)))"
   (declare (indent 0))
   (let* ((parsed (ert-gwt--parse-clauses clauses))
-         (name-info (ert-gwt--name-and-occurrence clauses))
+         (occurrence-hint (ert-gwt--source-occurrence clauses))
+         (name-info (ert-gwt--name-and-occurrence clauses occurrence-hint))
          (name (car name-info))
          (occurrence (cdr name-info))
          (file (ert-gwt--source-file))
@@ -483,8 +589,12 @@ exact hash depends on the file and the clauses:
          (thens (plist-get parsed :thens))
          (cleanups (plist-get parsed :cleanups)))
     `(progn
+       (when (ert-test-boundp ',name)
+         (ert-make-test-unbound ',name))
        (put ',name 'ert-gwt--definition
-            ',(list :file file :clauses clauses :occurrence occurrence))
+            (list :file ,file :clauses ',clauses :occurrence ,occurrence
+                  :generation (or ert-gwt--reload-generation
+                                  ert-gwt--generation)))
        (ert-deftest ,name ()
          "Anonymous GWT-style test defined by `ert-gwt-deftest'."
          (let ((ert-gwt--pre-buffers (buffer-list)))

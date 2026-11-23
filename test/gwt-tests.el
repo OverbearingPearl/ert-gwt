@@ -435,6 +435,105 @@
                          (ert-gwt-name-context file-b))))
       (delete-directory base t))))
 
+(ert-deftest gwt-tests--load-twice-replaces-test ()
+  "Loading the same file twice keeps one test with one name."
+  (let* ((before (mapcar #'ert-test-name (ert-select-tests t t)))
+         (file (make-temp-file "gwt-reload-" nil ".el"))
+         names first)
+    (unwind-protect
+        (progn
+          (with-temp-file file
+            (insert ";;; gwt-reload.el --- test -*- lexical-binding: t; -*-\n")
+            (insert "(require 'ert-gwt)\n\n")
+            (insert "(ert-gwt-deftest\n"
+                    "  (:given ((x 41)))\n"
+                    "  (:when (setq x (1+ x)))\n"
+                    "  (:then (should (= x 42))))\n"))
+          (load file nil t)
+          (setq names (gwt-tests--defined-names before))
+          (should (= (length names) 1))
+          (setq first (car names))
+          (load file nil t)
+          (setq names (gwt-tests--defined-names before))
+          (ert-info ("A second load replaces the first test")
+            (should (= (length names) 1))
+            (should (equal (car names) first))
+            (should (ert-test-boundp first))
+            (should (= (length (ert-select-tests t t))
+                       (1+ (length before))))))
+      (gwt-tests--delete-tests names)
+      (gwt-tests--kill-file-buffer file)
+      (when (file-exists-p file)
+        (delete-file file)))))
+
+(ert-deftest gwt-tests--eval-buffer-twice-replaces-test ()
+  "Evaluating the same buffer twice keeps one test with one name."
+  (let* ((before (mapcar #'ert-test-name (ert-select-tests t t)))
+         (file (make-temp-file "gwt-eval-" nil ".el"))
+         names first buffer)
+    (unwind-protect
+        (progn
+          (with-temp-file file
+            (insert ";;; gwt-eval.el --- test -*- lexical-binding: t; -*-\n")
+            (insert "(require 'ert-gwt)\n\n")
+            (insert "(ert-gwt-deftest\n"
+                    "  (:given ((x 10)))\n"
+                    "  (:when (setq x (* x 2)))\n"
+                    "  (:then (should (= x 20))))\n"))
+          (setq buffer (find-file-noselect file))
+          (with-current-buffer buffer (eval-buffer))
+          (setq names (gwt-tests--defined-names before))
+          (should (= (length names) 1))
+          (setq first (car names))
+          (with-current-buffer buffer (eval-buffer))
+          (setq names (gwt-tests--defined-names before))
+          (ert-info ("A second evaluation replaces the first test")
+            (should (= (length names) 1))
+            (should (equal (car names) first))
+            (should (ert-test-boundp first))
+            (should (= (length (ert-select-tests t t))
+                       (1+ (length before))))))
+      (gwt-tests--delete-tests names)
+      (gwt-tests--kill-file-buffer file)
+      (when (file-exists-p file)
+        (delete-file file)))))
+
+(ert-deftest gwt-tests--reload-removes-old-name ()
+  "Changing a clause removes the old test instead of leaving it behind."
+  (let* ((before (mapcar #'ert-test-name (ert-select-tests t t)))
+         (file (make-temp-file "gwt-stale-" nil ".el"))
+         names old)
+    (unwind-protect
+        (progn
+          (with-temp-file file
+            (insert ";;; gwt-stale.el --- test -*- lexical-binding: t; -*-\n")
+            (insert "(require 'ert-gwt)\n\n")
+            (insert "(ert-gwt-deftest\n"
+                    "  (:given ((x 1)))\n"
+                    "  (:when (ignore x))\n"
+                    "  (:then (should (= x 1))))\n"))
+          (load file nil t)
+          (setq names (gwt-tests--defined-names before))
+          (should (= (length names) 1))
+          (setq old (car names))
+          (with-temp-file file
+            (insert ";;; gwt-stale.el --- test -*- lexical-binding: t; -*-\n")
+            (insert "(require 'ert-gwt)\n\n")
+            (insert "(ert-gwt-deftest\n"
+                    "  (:given ((x 2)))\n"
+                    "  (:when (ignore x))\n"
+                    "  (:then (should (= x 2))))\n"))
+          (load file nil t)
+          (setq names (gwt-tests--defined-names before))
+          (ert-info ("Only the new test remains")
+            (should (= (length names) 1))
+            (should-not (equal (car names) old))
+            (should-not (ert-test-boundp old))))
+      (gwt-tests--delete-tests names)
+      (gwt-tests--kill-file-buffer file)
+      (when (file-exists-p file)
+        (delete-file file)))))
+
 (ert-deftest gwt-tests--cleanup ()
   "`ert-gwt--cleanup' kills new buffers, deletes tracked files and resets the list."
   (let* ((pre-buffers (buffer-list))
