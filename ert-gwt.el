@@ -480,6 +480,28 @@ FORM is printed and % escaped so it can be spliced safely."
           (replace-regexp-in-string "%" "%%"
                                     (prin1-to-string form))))
 
+(defun ert-gwt--test-docstring (givens when-form thens)
+  "Return documentation listing GIVENS, WHEN-FORM and THENS.
+The clauses are already parsed and are printed for a person reading
+`ert-describe-test', not escaped for an `ert-info' format string."
+  (concat "Anonymous GWT test defined by `ert-gwt-deftest'.\n\n"
+          (mapconcat
+           (lambda (given)
+             (let ((bindings (car given))
+                   (forms (cdr given)))
+               (concat "GIVEN: "
+                       (if bindings (ert-gwt--print-form bindings) "")
+                       (mapconcat
+                        (lambda (form)
+                          (concat "\n       " (ert-gwt--print-form form)))
+                        forms ""))))
+           givens "\n")
+          "\nWHEN: " (ert-gwt--print-form when-form)
+          "\n"
+          (mapconcat (lambda (then)
+                       (format "THEN: %s" (ert-gwt--print-form then)))
+                     thens "\n")))
+
 (defun ert-gwt--expand-then (THEN)
   "Expand one THEN form, recording a status note.
 A form that already starts with `should', `should-not', `should-error'
@@ -624,7 +646,8 @@ exact hash depends on the file and the clauses:
          (givens (plist-get parsed :givens))
          (when-form (plist-get parsed :when))
          (thens (plist-get parsed :thens))
-         (cleanups (plist-get parsed :cleanups)))
+         (cleanups (plist-get parsed :cleanups))
+         (docstring (ert-gwt--test-docstring givens when-form thens)))
     `(progn
        (when (ert-test-boundp ',name)
          (ert-make-test-unbound ',name))
@@ -634,7 +657,7 @@ exact hash depends on the file and the clauses:
                   :generation (or ert-gwt--reload-generation
                                   ert-gwt--generation)))
        (ert-deftest ,name ()
-         "Anonymous GWT-style test defined by `ert-gwt-deftest'."
+         ,docstring
          (let ((ert-gwt--pre-buffers (buffer-list)))
            (unwind-protect
                ,(ert-gwt--expand-givens givens when-form thens cleanups)

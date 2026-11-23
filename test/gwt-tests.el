@@ -166,6 +166,26 @@
         (makunbound 'gwt-tests--cleanup-ran)
       (error nil))))
 
+(ert-deftest gwt-tests--docstring-lists-clauses ()
+  "The generated ERT documentation names the three clauses."
+  (let ((load-file-name nil)
+        name)
+    (unwind-protect
+        (progn
+          (setq name
+                (eval '(ert-gwt-deftest
+                         (:given ((x 1)))
+                         (:when (ignore x))
+                         (:then (should (= x 1))))
+                      t))
+          (let ((text (ert-test-documentation (ert-get-test name))))
+            (should (string-match-p "GIVEN: ((x 1))" text))
+            (should (string-match-p "WHEN: (ignore x)" text))
+            (should (string-match-p "THEN: (should (= x 1))" text))
+            (should-not (string-match-p "Anonymous GWT-style" text))))
+      (when (and name (ert-test-boundp name))
+        (ert-delete-test name)))))
+
 (ert-deftest gwt-tests--expand-givens-nesting ()
   "Check the body structure produced by `ert-gwt--expand-givens'."
   (let ((expanded (ert-gwt--expand-givens
