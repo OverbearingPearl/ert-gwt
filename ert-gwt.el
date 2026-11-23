@@ -236,7 +236,10 @@ the current buffer is not a source file, as during `load'.  Signal a
 `user-error' if the source before point cannot be read."
   (when (and buffer-file-name
              (derived-mode-p 'emacs-lisp-mode))
-    (let ((limit (point))
+    ;; `eval-defun' expands the form with point on its opening
+    ;; parenthesis, so include that form in the count.  During `load'
+    ;; point is already past the form and needs no adjustment.
+    (let ((limit (if (eq (char-after) ?\() (1+ (point)) (point)))
           (count 0))
       (save-excursion
         (goto-char (point-min))

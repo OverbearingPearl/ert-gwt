@@ -816,6 +816,45 @@
       (when (file-exists-p file)
         (delete-file file)))))
 
+(ert-deftest gwt-tests--c-m-x-reuses-name ()
+  "Evaluating one form twice keeps its name instead of making a `-2'."
+  (let* ((before (mapcar #'ert-test-name (ert-select-tests t t)))
+         (file (make-temp-file "gwt-cmx-" nil ".el"))
+         (buffer nil)
+         names first)
+    (unwind-protect
+        (progn
+          (with-temp-file file
+            (insert ";;; gwt-cmx.el --- test -*- lexical-binding: t; -*-\n")
+            (insert "(require 'ert-gwt)\n\n")
+            (insert "(ert-gwt-deftest\n"
+                    "  (:given ((x 1)))\n"
+                    "  (:when (ignore x))\n"
+                    "  (:then (should (= x 1))))\n"))
+          (setq buffer (find-file-noselect file))
+          (with-current-buffer buffer
+            (emacs-lisp-mode)
+            (goto-char (point-min))
+            (search-forward "(ert-gwt-deftest")
+            (beginning-of-line)
+            (eval-defun nil)
+            (setq names (gwt-tests--defined-names before))
+            (should (= (length names) 1))
+            (setq first (car names))
+            (goto-char (point-min))
+            (search-forward "(ert-gwt-deftest")
+            (beginning-of-line)
+            (eval-defun nil)
+            (setq names (gwt-tests--defined-names before))
+            (ert-info ("The same form replaces itself")
+              (should (= (length names) 1))
+              (should (equal (car names) first)))))
+      (gwt-tests--delete-tests names)
+      (when (buffer-live-p buffer)
+        (kill-buffer buffer))
+      (when (file-exists-p file)
+        (delete-file file)))))
+
 (ert-deftest gwt-tests--jump-mode-does-not-control-reload ()
   "Reload advice survives when only the finder mode is turned off."
   (let ((jump ert-gwt-defining-file-jump-mode)
