@@ -1,40 +1,28 @@
-;;; ert-gwt-test.el --- Tests for ert-gwt -*- lexical-binding: t; -*-
+;;; gwt-tests.el --- Tests for ert-gwt -*- lexical-binding: t; -*-
 
 ;;; Commentary:
 
-;; Tests for `ert-gwt-deftest', its internal helpers and the
-;; `ert-gwt-test-run' entry point.
+;; Tests for `ert-gwt-deftest' and its internal helpers.
 
 ;;; Code:
 
 (require 'cl-lib)
 (require 'ert)
 
-(defun ert-gwt-test--package-root ()
-  "Return the root directory of the ert-gwt package."
-  (or (when load-file-name
-        (file-name-directory load-file-name))
-      (when buffer-file-name
-        (file-name-directory buffer-file-name))
-      (let ((main (locate-library "ert-gwt")))
-        (when main
-          (file-name-directory main)))
-      (and (file-exists-p "ert-gwt.el")
-           (expand-file-name default-directory))))
-
-(defun ert-gwt-test--probe ()
+(defun gwt-tests--probe ()
   "Return the answer used to check that stubs are undone."
   "original-answer")
 
-;; Let `require' find the package root.
+;; Let `require' find the package root when this file is loaded directly.
 (when load-file-name
-  (add-to-list 'load-path (ert-gwt-test--package-root)))
+  (add-to-list 'load-path
+               (expand-file-name ".." (file-name-directory load-file-name))))
 
 (require 'ert-gwt)
 
 ;;; Clause parsing
 
-(ert-deftest ert-gwt-test--parse-full-clauses ()
+(ert-deftest gwt-tests--parse-full-clauses ()
   (let ((parsed (ert-gwt--parse-clauses
                  '((:given ((x 1)) (setq x (1+ x)))
                    (:when (ignore x))
@@ -45,7 +33,7 @@
                      '((((x 1)) (setq x (1+ x))))))
       (should (= (length (plist-get parsed :thens)) 2)))))
 
-(ert-deftest ert-gwt-test--parse-then-multiple-clauses ()
+(ert-deftest gwt-tests--parse-then-multiple-clauses ()
   "Repeated :then clauses concatenate their forms."
   (let ((parsed (ert-gwt--parse-clauses
                  '((:given ((x 1)))
@@ -57,34 +45,34 @@
       (should (equal (plist-get parsed :thens)
                      '((should (= x 1)) (should (> x 0)) t))))))
 
-(ert-deftest ert-gwt-test--parse-rejects-missing-when ()
+(ert-deftest gwt-tests--parse-rejects-missing-when ()
   (ert-info ("Parsing clauses without :when must signal an error")
     (should-error (ert-gwt--parse-clauses '((:then t))))))
 
-(ert-deftest ert-gwt-test--parse-rejects-missing-then ()
+(ert-deftest gwt-tests--parse-rejects-missing-then ()
   (ert-info ("Parsing clauses without :then must signal an error")
     (should-error (ert-gwt--parse-clauses '((:when t))))))
 
-(ert-deftest ert-gwt-test--parse-rejects-unknown-clause ()
+(ert-deftest gwt-tests--parse-rejects-unknown-clause ()
   (ert-info ("Parsing an unknown :bogus clause must signal an error")
     (should-error (ert-gwt--parse-clauses
                    '((:when t) (:then t) (:bogus t))))))
 
-(ert-deftest ert-gwt-test--parse-rejects-second-when ()
+(ert-deftest gwt-tests--parse-rejects-second-when ()
   (ert-info ("Parsing a second :when clause must signal an error")
     (should-error (ert-gwt--parse-clauses
                    '((:when t) (:when t) (:then t))))))
 
 ;;; Naming
 
-(ert-deftest ert-gwt-test--name-rejects-describe ()
+(ert-deftest gwt-tests--name-rejects-describe ()
   (ert-info ("A :describe clause is rejected since :describe was removed\n and the error message mentions :describe")
     (let ((err (should-error (ert-gwt--parse-clauses
                               '((:describe "Login Redirects")
                                 (:when t) (:then t))))))
       (should (string-match-p ":describe" (error-message-string err))))))
 
-(ert-deftest ert-gwt-test--name-anonymous-counter ()
+(ert-deftest gwt-tests--name-anonymous-counter ()
   (let ((ert-gwt--seen (make-hash-table :test 'equal))
         (load-file-name nil))
     (with-temp-buffer
@@ -107,7 +95,7 @@
                        "\\`test-gwt-[0-9a-f]\\{8\\}\\(?:-[1-9][0-9]*\\)?\\'"
                        (symbol-name name))))))))))
 
-(ert-deftest ert-gwt-test--parse-cleanup-and-bare-given ()
+(ert-deftest gwt-tests--parse-cleanup-and-bare-given ()
   (ert-info ("Parse collects :cleanups as ((foo) (bar) (baz)) in order")
     (let ((plist (ert-gwt--parse-clauses
                   '((:given (x) (setq x 1))
@@ -123,36 +111,36 @@
       (should (equal (plist-get plist :givens)
                      '((nil (message "hi"))))))))
 
-(ert-deftest ert-gwt-test--deftest-cleanup-runs-on-failure ()
+(ert-deftest gwt-tests--deftest-cleanup-runs-on-failure ()
   (unwind-protect
       (progn
-        (defvar ert-gwt-test--cleanup-ran)
-        (let ((ert-gwt-test--cleanup-ran nil)
+        (defvar gwt-tests--cleanup-ran)
+        (let ((gwt-tests--cleanup-ran nil)
               (load-file-name nil)
               expected-name)
           (ert-info ("Evaluating ert-gwt-deftest registers the anonymous test")
             (setq expected-name
                   (eval '(ert-gwt-deftest
-                           (:cleanup (setq ert-gwt-test--cleanup-ran t))
+                           (:cleanup (setq gwt-tests--cleanup-ran t))
                            (:when (error "Boom"))
                            (:then t))
                         t))
             (should (symbolp expected-name))
             (should (ert-test-boundp expected-name)))
           (ert-info ("Running the failing test still runs :cleanup, flag should be t")
-            (setq ert-gwt-test--cleanup-ran nil)
+            (setq gwt-tests--cleanup-ran nil)
             (condition-case nil
                 (ert-run-test (ert-get-test expected-name))
               (error nil))
-            (should (eq ert-gwt-test--cleanup-ran t)))
+            (should (eq gwt-tests--cleanup-ran t)))
           (ert-info ("The anonymous test is deleted so nothing leaks")
             (ert-delete-test expected-name)
             (should-not (ert-test-boundp expected-name)))))
     (condition-case nil
-        (makunbound 'ert-gwt-test--cleanup-ran)
+        (makunbound 'gwt-tests--cleanup-ran)
       (error nil))))
 
-(ert-deftest ert-gwt-test--expand-givens-nesting ()
+(ert-deftest gwt-tests--expand-givens-nesting ()
   "Check the body structure produced by `ert-gwt--expand-givens'."
   (let ((expanded (ert-gwt--expand-givens
                    '((((foo 1))) (((bar 2)) (setq bar (1+ bar))))
@@ -187,7 +175,7 @@
           (let ((summary (nth 3 progn)))
             (should (eq (car summary) 'when))))))))
 
-(ert-deftest ert-gwt-test--expand-givens-cleanups-wrap ()
+(ert-deftest gwt-tests--expand-givens-cleanups-wrap ()
   "Cleanups are the unwind forms of an `unwind-protect'."
   (let ((expanded (ert-gwt--expand-givens
                    nil 't nil '((cleanup-one) (cleanup-two)))))
@@ -198,14 +186,14 @@
       (should (eq (car (cadr up)) 'progn))
       (should (equal (cddr up) '((cleanup-one) (cleanup-two)))))))
 
-(ert-deftest ert-gwt-test--no-double-should-in-expansion ()
+(ert-deftest gwt-tests--no-double-should-in-expansion ()
   "A `:then' body that already asserts is not wrapped in `should'."
   (let* ((expansion (macroexpand '(ert-gwt-deftest (:given nil) (:when nil) (:then (should-not nil)))))
          (text (format "%s" expansion)))
     (should (string-match "(should-not nil)" text))
     (should-not (string-match "(should (should-not nil))" text))))
 
-(ert-deftest ert-gwt-test--temp-file-registration ()
+(ert-deftest gwt-tests--temp-file-registration ()
   "`ert-gwt--temp-file' creates the file and records it for cleanup."
   (let (ert-gwt--tracked-files path)
     (unwind-protect
@@ -216,7 +204,7 @@
       (when (and path (file-exists-p path))
         (delete-file path)))))
 
-(ert-deftest ert-gwt-test--defining-anchor-serialization ()
+(ert-deftest gwt-tests--defining-anchor-serialization ()
   (ert-info ("Normal clause list yields non-nil serialized text containing each literal")
     (let ((clauses '("should" "return" "a cons cell")))
       (let ((result (ert-gwt--defining-anchor clauses)))
@@ -240,7 +228,7 @@
               result))))
       (kill-buffer buf))))
 
-(ert-deftest ert-gwt-test--defining-anchor-fallback-lookup ()
+(ert-deftest gwt-tests--defining-anchor-fallback-lookup ()
   "Jump advice finds the anchor and degrades loudly when it is missing."
   (let* ((temp-file (make-temp-file "gwt-anchor-test-" nil ".el"))
          (subject 'gwt-test--anchor-subject)
@@ -318,7 +306,7 @@
           (delete-file temp-file)
         (error nil)))))
 
-(ert-deftest ert-gwt-test--cleanup ()
+(ert-deftest gwt-tests--cleanup ()
   "`ert-gwt--cleanup' kills new buffers, deletes tracked files and resets the list."
   (let* ((pre-buffers (buffer-list))
          ert-gwt--tracked-files
@@ -339,7 +327,7 @@
       (when (buffer-live-p buf)
         (kill-buffer buf)))))
 
-(ert-deftest ert-gwt-test--name-and-cleanup-branches ()
+(ert-deftest gwt-tests--name-and-cleanup-branches ()
   "Check name fallbacks, duplicate suffixes and directory cleanup."
   (ert-info ("ert-gwt--name: load-file-name nil falls back to the \"test-gwt\" prefix")
     (let (load-file-name)
@@ -353,7 +341,7 @@
       (should (string-match-p "\\`dup-[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]-2\\'"
                               (ert-gwt-name-from-clauses "dup" clauses taken)))))
   (ert-info ("ert-gwt--cleanup: deletes a tracked directory; buffer-kill branch skipped by passing the full buffer-list as pre-buffers")
-    (let* ((dir (make-temp-file "ert-gwt-test-dir-" t))
+    (let* ((dir (make-temp-file "gwt-tests-dir-" t))
            (ert-gwt--tracked-files (list dir)))
       (unwind-protect
           (progn
@@ -388,72 +376,26 @@
   (:then (not (zerop n))))
 
 (ert-gwt-deftest
-  (:given (((symbol-function 'ert-gwt-test--probe)
+  (:given (((symbol-function 'gwt-tests--probe)
             (lambda () :stub-probe))))
-  (:when (ert-gwt-test--probe))
-  (:then (should (eq (ert-gwt-test--probe) :stub-probe)))
+  (:when (gwt-tests--probe))
+  (:then (should (eq (gwt-tests--probe) :stub-probe)))
   (:cleanup (ert-info ("Probe must still return the stub at cleanup")
-              (should (eq (ert-gwt-test--probe) :stub-probe)))))
+              (should (eq (gwt-tests--probe) :stub-probe)))))
 
 ;;; Test isolation
 
-(ert-deftest ert-gwt-test--side-effect-free ()
+(ert-deftest gwt-tests--side-effect-free ()
   "Running a GWT test must not leave extra buffers behind."
   (let ((before (buffer-list)))
     (unwind-protect
         (progn
           (ert-run-test
-           (ert-get-test 'ert-gwt-test--name-rejects-describe))
+           (ert-get-test 'gwt-tests--name-rejects-describe))
           (ert-info ("Buffer-list is unchanged by the test run")
             (should (equal before (buffer-list)))))
       nil)))
 
-;;; Runner
+(provide 'gwt-tests)
 
-(defun ert-gwt-test--module-features ()
-  "Return features for every package file except test files."
-  (let* ((root (ert-gwt-test--package-root))
-         (lisp (expand-file-name "lisp" root))
-         (files (append
-                 (directory-files root t "^[^.].*\\.el\\='")
-                 (when (file-directory-p lisp)
-                   (directory-files lisp t "^[^.].*\\.el\\='")))))
-    (mapcar (lambda (file)
-              (intern (file-name-nondirectory
-                       (file-name-sans-extension file))))
-            (cl-remove-if
-             (lambda (file)
-               (string-match-p "-test\\.el\\='" file))
-             files))))
-
-(defun ert-gwt-test-run ()
-  "Reload ert-gwt from source and run the suite.
-In batch mode, exit with the result; interactively, open the ERT results."
-  (interactive)
-  (let* ((root (ert-gwt-test--package-root))
-         (lisp (expand-file-name "lisp" root))
-         (main (expand-file-name "ert-gwt.el" root))
-         (test-files
-          (cl-remove-if-not
-           (lambda (file) (string-match-p "-test\\.el\\'" file))
-           (directory-files root t "^[^.].*\\.el\\'")))
-         (lisp-files
-          (when (file-directory-p lisp)
-            (cl-remove-if
-             (lambda (file) (string-match-p "-test\\.el\\'" file))
-             (directory-files lisp t "^[^.].*\\.el\\'")))))
-    (when (get-buffer "*ert*") (kill-buffer "*ert*"))
-    (ert-delete-all-tests)
-    (dolist (feature (ert-gwt-test--module-features))
-      (when (featurep feature)
-        (unload-feature feature t)))
-    (load-file main)
-    (dolist (file lisp-files) (load-file file))
-    (dolist (file test-files) (load-file file))
-    (if noninteractive
-        (ert-run-tests-batch-and-exit "ert-gwt-")
-      (ert "ert-gwt-"))))
-
-(provide 'ert-gwt-test)
-
-;;; ert-gwt-test.el ends here
+;;; gwt-tests.el ends here
