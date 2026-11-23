@@ -347,7 +347,11 @@
             (ert-info ("Finding the .elc test opens the .el form")
               (should (equal (file-truename (buffer-file-name (car loc)))
                              (file-truename file)))
-              (should (= (gwt-tests--line-at loc) 4)))))
+              (should (= (gwt-tests--line-at loc) 4)))
+            (ert-info ("ert-test-file-name reports the source file")
+              (should (equal (file-truename
+                              (ert-test-file-name (ert-get-test name)))
+                             (file-truename file))))))
       (gwt-tests--delete-tests names)
       (gwt-tests--kill-file-buffer file)
       (dolist (path (list file elc))

@@ -140,6 +140,14 @@ TYPE and FILE are passed to ORIG."
            (ert-gwt--find-definition symbol))
       (funcall orig symbol type file)))
 
+(defun ert-gwt--advice-test-file-name (file test)
+  "Return FILE unless TEST records a source file of its own."
+  (or (and (ert-test-p test)
+           (let ((name (ert-test-name test)))
+             (and (get name 'ert-gwt--definition)
+                  (plist-get (get name 'ert-gwt--definition) :file))))
+      file))
+
 (defun ert-gwt-unload-function ()
   "Undo the setup done when ert-gwt was loaded."
   (remove-hook 'after-load-functions #'ert-gwt--seen-clear-for-load)
@@ -150,7 +158,8 @@ TYPE and FILE are passed to ORIG."
 (define-minor-mode ert-gwt-defining-file-jump-mode
   "Jump to `ert-gwt-deftest' definitions from ERT results.
 When enabled, `find-function' uses the defining form recorded when
-the test was defined."
+the test was defined, and `ert-test-file-name' reports its source
+file."
   :global t
   :group 'ert-gwt
   (if ert-gwt-defining-file-jump-mode
@@ -159,12 +168,16 @@ the test was defined."
                     #'ert-gwt--advice-find-function-search)
         (advice-add 'find-definition-noselect :around
                     #'ert-gwt--advice-find-definition-noselect)
+        (advice-add 'ert-test-file-name :filter-return
+                    #'ert-gwt--advice-test-file-name)
         (add-hook 'after-load-functions #'ert-gwt--seen-clear-for-load))
     (remove-hook 'after-load-functions #'ert-gwt--seen-clear-for-load)
     (advice-remove 'find-function-search-for-symbol
                    #'ert-gwt--advice-find-function-search)
     (advice-remove 'find-definition-noselect
-                   #'ert-gwt--advice-find-definition-noselect)))
+                   #'ert-gwt--advice-find-definition-noselect)
+    (advice-remove 'ert-test-file-name
+                   #'ert-gwt--advice-test-file-name)))
 
 (ert-gwt-defining-file-jump-mode 1)
 

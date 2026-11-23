@@ -148,7 +148,14 @@ byte-compiled case opens the corresponding `.el` source.
 `ert-gwt-defining-file-jump-mode` enables this when ert-gwt loads. It
 advises `find-function-search-for-symbol` and
 `find-definition-noselect`; ordinary function definitions are left
-alone.
+alone. `ert-test-file-name` returns the `.el` source for a test loaded
+from `.elc`, so ERT's own file links agree with the finder.
+
+Two limits remain. Evaluating the same buffer twice gives the second
+run a `-2` suffix and leaves the first test registered; reload the file
+or delete the stale test if that matters. ERT's condition-text buttons
+still only turn function definitions into links; the test-name button
+and `ert-describe-test` are the supported ways to reach a GWT form.
 
 
 ### Multiple `:then` clauses
