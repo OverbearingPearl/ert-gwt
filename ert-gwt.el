@@ -235,9 +235,10 @@ Only descend into wrappers that run at load time."
    (t 0)))
 
 (defun ert-gwt--source-occurrence (clauses)
-  "Return the one-based occurrence of CLAUSES before point.
+  "Return the one-based occurrence of CLAUSES through the form at point.
 Count definitions in the current Emacs Lisp source buffer from the
-beginning through the form currently being expanded.  Return nil when
+beginning through the form being expanded, including a form whose
+opening parenthesis is at point.  Return nil when
 the current buffer is not a source file, as during `load'.  Signal a
 `user-error' if the source before point cannot be read."
   (when (and buffer-file-name
