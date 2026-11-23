@@ -667,11 +667,30 @@
           (ert-info ("Only the new test remains")
             (should (= (length names) 1))
             (should-not (equal (car names) old))
-            (should-not (ert-test-boundp old))))
+            (should-not (ert-test-boundp old))
+            (should-not (get old 'ert-gwt--definition))))
       (gwt-tests--delete-tests names)
       (gwt-tests--kill-file-buffer file)
       (when (file-exists-p file)
         (delete-file file)))))
+
+(ert-deftest gwt-tests--jump-mode-does-not-control-reload ()
+  "Reload advice survives when only the finder mode is turned off."
+  (let ((jump ert-gwt-defining-file-jump-mode)
+        (reload ert-gwt-auto-reload-mode))
+    (unwind-protect
+        (progn
+          (ert-gwt-defining-file-jump-mode -1)
+          (should (advice-member-p #'ert-gwt--advice-load 'load))
+          (should (advice-member-p #'ert-gwt--advice-eval-buffer 'eval-buffer))
+          (should-not (advice-member-p #'ert-gwt--advice-find-function-search
+                                       'find-function-search-for-symbol))
+          (ert-gwt-auto-reload-mode -1)
+          (should-not (advice-member-p #'ert-gwt--advice-load 'load))
+          (should-not (advice-member-p #'ert-gwt--advice-eval-buffer
+                                       'eval-buffer)))
+      (when jump (ert-gwt-defining-file-jump-mode 1))
+      (when reload (ert-gwt-auto-reload-mode 1)))))
 
 (ert-deftest gwt-tests--cleanup ()
   "`ert-gwt--cleanup' kills new buffers, deletes tracked files and resets the list."

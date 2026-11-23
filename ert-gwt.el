@@ -245,6 +245,12 @@ TYPE and FILE are passed to ORIG."
            (ert-gwt--find-definition symbol))
       (funcall orig symbol type file)))
 
+(defun ert-gwt--forget-definition (name)
+  "Remove NAME's ERT test and recorded GWT definition."
+  (when (ert-test-boundp name)
+    (ert-make-test-unbound name))
+  (put name 'ert-gwt--definition nil))
+
 (defun ert-gwt--delete-stale-tests (file generation)
   "Delete from FILE any test definition older than GENERATION."
   (let ((file (file-truename file)))
@@ -255,7 +261,7 @@ TYPE and FILE are passed to ORIG."
                    (or (equal (plist-get definition :file) file)
                        (equal (plist-get definition :load-file) file))
                    (not (equal (plist-get definition :generation) generation)))
-          (ert-make-test-unbound name))))))
+          (ert-gwt--forget-definition name))))))
 
 (defun ert-gwt--advice-load (orig file &rest args)
   "Load FILE, dropping definitions that are no longer present.
@@ -321,7 +327,7 @@ exists, and the loaded file when it does not."
 
 (defun ert-gwt-unload-function ()
   "Undo the setup done when ert-gwt was loaded."
-  (remove-hook 'after-load-functions #'ert-gwt--seen-clear-for-load)
+  (ert-gwt-auto-reload-mode -1)
   (ert-gwt-defining-file-jump-mode -1)
   nil)
 
@@ -329,8 +335,9 @@ exists, and the loaded file when it does not."
 (define-minor-mode ert-gwt-defining-file-jump-mode
   "Jump to `ert-gwt-deftest' definitions from ERT results.
 When enabled, `find-function' uses the defining form recorded when
-the test was defined, and `ert-test-file-name' reports its source
-file."
+the test was defined, `ert-test-file-name' reports its source file,
+and generated names in ERT condition text become buttons.  Reload
+handling is a separate mode, `ert-gwt-auto-reload-mode'."
   :global t
   :group 'ert-gwt
   (if ert-gwt-defining-file-jump-mode
@@ -342,11 +349,7 @@ file."
         (advice-add 'ert-test-file-name :around
                     #'ert-gwt--advice-test-file-name)
         (advice-add 'ert--make-xrefs-region :around
-                    #'ert-gwt--advice-make-xrefs-region)
-        (advice-add 'load :around #'ert-gwt--advice-load)
-        (advice-add 'eval-buffer :around #'ert-gwt--advice-eval-buffer)
-        (add-hook 'after-load-functions #'ert-gwt--seen-clear-for-load))
-    (remove-hook 'after-load-functions #'ert-gwt--seen-clear-for-load)
+                    #'ert-gwt--advice-make-xrefs-region))
     (advice-remove 'find-function-search-for-symbol
                    #'ert-gwt--advice-find-function-search)
     (advice-remove 'find-definition-noselect
@@ -354,7 +357,23 @@ file."
     (advice-remove 'ert-test-file-name
                    #'ert-gwt--advice-test-file-name)
     (advice-remove 'ert--make-xrefs-region
-                   #'ert-gwt--advice-make-xrefs-region)
+                   #'ert-gwt--advice-make-xrefs-region)))
+
+;;;###autoload
+(define-minor-mode ert-gwt-auto-reload-mode
+  "Replace GWT tests when their defining file is evaluated again.
+When enabled, loading a file or evaluating a buffer unbinds tests
+that no longer exist and keeps the names of tests that do, instead of
+leaving a `-2' duplicate behind.  This mode does not affect
+`find-function'; `ert-gwt-defining-file-jump-mode' does that."
+  :global t
+  :group 'ert-gwt
+  (if ert-gwt-auto-reload-mode
+      (progn
+        (advice-add 'load :around #'ert-gwt--advice-load)
+        (advice-add 'eval-buffer :around #'ert-gwt--advice-eval-buffer)
+        (add-hook 'after-load-functions #'ert-gwt--seen-clear-for-load))
+    (remove-hook 'after-load-functions #'ert-gwt--seen-clear-for-load)
     (advice-remove 'load #'ert-gwt--advice-load)
     (advice-remove 'eval-buffer #'ert-gwt--advice-eval-buffer)))
 
@@ -364,9 +383,20 @@ Set this to nil before loading ert-gwt to keep the finder advices off."
   :type 'boolean
   :group 'ert-gwt)
 
+(defcustom ert-gwt-auto-enable-reload-mode t
+  "Whether loading ert-gwt enables `ert-gwt-auto-reload-mode'.
+Set this to nil before loading ert-gwt to keep the load and
+`eval-buffer' advices off."
+  :type 'boolean
+  :group 'ert-gwt)
+
 (when (and (boundp 'ert-gwt-auto-enable-jump-mode)
            (symbol-value 'ert-gwt-auto-enable-jump-mode))
   (ert-gwt-defining-file-jump-mode 1))
+
+(when (and (boundp 'ert-gwt-auto-enable-reload-mode)
+           (symbol-value 'ert-gwt-auto-enable-reload-mode))
+  (ert-gwt-auto-reload-mode 1))
 
 (when (and (boundp 'load-file-name) load-file-name)
   (let ((dir (file-name-directory load-file-name)))
@@ -678,8 +708,7 @@ hash cannot be shown here because it includes the path; in a file named
          (cleanups (plist-get parsed :cleanups))
          (docstring (ert-gwt--test-docstring givens when-form thens)))
     `(progn
-       (when (ert-test-boundp ',name)
-         (ert-make-test-unbound ',name))
+       (ert-gwt--forget-definition ',name)
        (put ',name 'ert-gwt--definition
             (list :file ,file :clauses ',clauses :occurrence ,occurrence
                   :load-file (or load-file-name buffer-file-name)
