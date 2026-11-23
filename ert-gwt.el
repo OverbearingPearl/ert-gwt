@@ -240,10 +240,14 @@ after every clause has run, and CLEANUPS always run."
         ;; The steps alone are the body when there is nothing to clean up.
         ;; `unwind-protect' with no unwind forms is legal but pointless, and
         ;; Emacs 30 warns about it on every test that has no `:cleanup'.
+        ;; The WHEN value is only echoed in the ERT status line.  It is
+        ;; kept rather than dropped because a discarded pure call looks
+        ;; like dead code to Emacs 30's byte-compiler; `ignore' and `prog1'
+        ;; both still let the warning reach the call inside.
         (steps
          `((ert-info (,when-text)
               (condition-case ert-gwt--err
-                  (progn ,WHEN-FORM)
+                  (setq ert-gwt--when-value ,WHEN-FORM)
                 (error
                  (setq ert-gwt--aborted t)
                  (setq ert-gwt--first-error ert-gwt--err))))
@@ -267,6 +271,9 @@ after every clause has run, and CLEANUPS always run."
 
 (defvar ert-gwt--tracked-files nil
   "Temp files created by `ert-gwt--temp-file', deleted after each test.")
+
+(defvar ert-gwt--when-value nil
+  "The value of the most recent WHEN form.")
 
 (defvar ert-gwt--then-notes nil
   "Status notes for the THEN clauses of the current test.")

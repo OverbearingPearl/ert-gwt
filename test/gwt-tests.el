@@ -195,7 +195,10 @@
             (should (consp (nth 1 when-info)))
             (should (= (length inner) 1))
             (should (eq (car cc) 'condition-case))
-            (should (equal (nth 2 cc) '(progn (= foo bar)))))
+            ;; The WHEN value is kept in a variable, which also keeps
+            ;; Emacs 30 from warning that it is unused.
+            (should (equal (nth 2 cc)
+                           '(setq ert-gwt--when-value (= foo bar)))))
           (let ((then-cond (nth 2 progn)))
             (should (eq (car then-cond) 'cond)))
           (let ((summary (nth 3 progn)))
@@ -465,6 +468,16 @@
 (ert-gwt-deftest
   (:when t)
   (:then t))
+
+;; The WHEN value is only echoed in the ERT status line, never used.  A
+;; pure call there must not look like a discarded value to Emacs 30's
+;; byte-compiler; `make lint' byte-compiles this file, so the test's real
+;; assertion is that it compiles without that warning.
+(ert-gwt-deftest
+  (:given ((x '(:answer 42))
+           (y '(:question 7))))
+  (:when (list (plist-get x :answer) (plist-get y :question)))
+  (:then (should (= 42 (plist-get x :answer)))))
 
 (ert-gwt-deftest
   (:given ((x 1) (y 2)))
