@@ -317,6 +317,66 @@
       (when (file-exists-p file)
         (delete-file file)))))
 
+(ert-deftest gwt-tests--find-definition-inside-wrapper ()
+  "A definition inside `progn' and after whitespace is still found."
+  (let* ((before (mapcar #'ert-test-name (ert-select-tests t t)))
+         (file (make-temp-file "gwt-wrapped-" nil ".el"))
+         names)
+    (unwind-protect
+        (progn
+          (with-temp-file file
+            (insert ";;; gwt-wrapped.el --- test -*- lexical-binding: t; -*-\n")
+            (insert "(require 'ert-gwt)\n\n")
+            (insert "(progn\n"
+                    "  (  ert-gwt-deftest\n"
+                    "    (:given ((x 1)))\n"
+                    "    (:when (ignore x))\n"
+                    "    (:then (should (= x 1)))))\n"))
+          (load file nil t)
+          (setq names (gwt-tests--defined-names before))
+          (should (= (length names) 1))
+          (let ((loc (find-definition-noselect (car names) 'ert--test)))
+            (should (= (gwt-tests--line-at loc) 5))
+            (with-current-buffer (car loc)
+              (goto-char (cdr loc))
+              (should (looking-at-p "(  ert-gwt-deftest")))))
+      (gwt-tests--delete-tests names)
+      (gwt-tests--kill-file-buffer file)
+      (when (file-exists-p file)
+        (delete-file file)))))
+
+(ert-deftest gwt-tests--find-definition-stale-signals ()
+  "A changed clause gives a useful error instead of a silent miss."
+  (let* ((before (mapcar #'ert-test-name (ert-select-tests t t)))
+         (file (make-temp-file "gwt-stale-" nil ".el"))
+         names name)
+    (unwind-protect
+        (progn
+          (with-temp-file file
+            (insert ";;; gwt-stale.el --- test -*- lexical-binding: t; -*-\n")
+            (insert "(require 'ert-gwt)\n\n")
+            (insert "(ert-gwt-deftest\n"
+                    "  (:given ((x 1)))\n"
+                    "  (:when (ignore x))\n"
+                    "  (:then (should (= x 1))))\n"))
+          (load file nil t)
+          (setq names (gwt-tests--defined-names before))
+          (should (= (length names) 1))
+          (setq name (car names))
+          (with-temp-file file
+            (insert ";;; gwt-stale.el --- test -*- lexical-binding: t; -*-\n")
+            (insert "(require 'ert-gwt)\n\n")
+            (insert "(ert-gwt-deftest\n"
+                    "  (:given ((x 2)))\n"
+                    "  (:when (ignore x))\n"
+                    "  (:then (should (= x 2))))\n"))
+          (should-error (find-definition-noselect name 'ert--test)
+                        :type 'user-error))
+      (gwt-tests--delete-tests names)
+      (gwt-tests--kill-file-buffer file)
+      (when (file-exists-p file)
+        (delete-file file)))))
+
 (ert-deftest gwt-tests--find-definition-byte-compiled ()
   "A test loaded from .elc still points at the .el form."
   (let* ((before (mapcar #'ert-test-name (ert-select-tests t t)))

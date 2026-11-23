@@ -163,42 +163,65 @@ the current buffer is not a source file, as during `load'."
           (error nil)))
       (when (> count 0) count))))
 
+(defun ert-gwt--scan-definitions (clauses end)
+  "Return positions of CLAUSES forms before END.
+Point starts at a form boundary.  Descend into every list except
+quoted data, so definitions inside `progn', `when', `if' and
+`eval-and-compile' are found, and leading whitespace does not matter."
+  (let (positions)
+    (while (and (< (point) end)
+                (progn
+                  (forward-comment (point-max))
+                  (and (< (point) end)
+                       (not (eq (char-after) ?\))))))
+      (let* ((start (point))
+             (form (let ((read-eval nil))
+                     (ignore read-eval)
+                     (read (current-buffer)))))
+        (when (and (consp form)
+                   (eq (car form) 'ert-gwt-deftest)
+                   (equal (cdr form) clauses))
+          (push start positions))
+        (when (and (consp form)
+                   (not (memq (car form) '(quote function))))
+          (let ((form-end (point)))
+            (save-excursion
+              (goto-char (1+ start))
+              (setq positions
+                    (nconc (nreverse
+                            (ert-gwt--scan-definitions clauses form-end))
+                           positions)))))))
+    (nreverse positions)))
+
+(defun ert-gwt--definition-positions (file clauses)
+  "Return the positions of CLAUSES in FILE."
+  (with-current-buffer (find-file-noselect file)
+    (save-excursion
+      (save-restriction
+        (widen)
+        (with-syntax-table emacs-lisp-mode-syntax-table
+          (goto-char (point-min))
+          (ert-gwt--scan-definitions clauses (point-max)))))))
+
 (defun ert-gwt--find-definition (symbol)
   "Return (BUFFER . POSITION) for SYMBOL's recorded GWT definition.
-Return nil when the definition cannot be located."
+Signal a `user-error' when the source no longer contains the form."
   (let* ((definition (get symbol 'ert-gwt--definition))
          (file (plist-get definition :file))
          (clauses (plist-get definition :clauses))
          (occurrence (or (plist-get definition :occurrence) 1)))
-    (when (and file (file-readable-p file) clauses)
-      (condition-case nil
-          (with-current-buffer (find-file-noselect file)
-            (save-excursion
-              (save-restriction
-                (widen)
-                (with-syntax-table emacs-lisp-mode-syntax-table
-                  (goto-char (point-min))
-                  (let ((seen 0)
-                        found)
-                    (condition-case nil
-                        (while (not (eobp))
-                          (forward-comment (point-max))
-                          (if (looking-at "(ert-gwt-deftest\\_>")
-                              (let ((start (point))
-                                    (form (let ((read-eval nil))
-                                            (ignore read-eval)
-                                            (read (current-buffer)))))
-                                (when (and (consp form)
-                                           (equal (cdr form) clauses))
-                                  (setq seen (1+ seen))
-                                  (when (= seen occurrence)
-                                    (setq found start))))
-                            (forward-sexp 1)))
-                      (end-of-file nil)
-                      (error nil))
-                    (when found
-                      (cons (current-buffer) found)))))))
-        (error nil)))))
+    (unless (and file clauses)
+      (user-error "No recorded source definition for %s" symbol))
+    (unless (file-readable-p file)
+      (user-error "The source file %s is missing" file))
+    (let* ((positions (ert-gwt--definition-positions file clauses))
+           (position (nth (1- occurrence) positions))
+           (count (length positions)))
+      (unless position
+        (user-error
+         "The definition of %s is stale; %s has %d matching form%s"
+         symbol file count (if (= count 1) "" "s")))
+      (cons (find-file-noselect file) position))))
 
 (defun ert-gwt--advice-find-function-search (orig symbol type library)
   "Call ORIG unless SYMBOL has a recorded GWT definition.
