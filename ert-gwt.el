@@ -189,49 +189,71 @@ is derived from the whole form."
         (print-escape-nonascii t))
     (prin1-to-string form)))
 
+(defconst ert-gwt--definition-wrappers
+  (list 'progn (intern "eval-and-compile") 'eval-when-compile
+        'cl-eval-when
+        'when 'unless 'if 'cond 'and 'or 'let 'let* 'letrec 'while
+        'dolist 'dotimes 'save-excursion 'save-restriction
+        'unwind-protect 'condition-case)
+  "Forms whose bodies run while a file is being loaded.
+The definition finder and the source counter only descend into these,
+so an `ert-gwt-deftest' inside a function body is not mistaken for a
+top-level test.")
+
+(defun ert-gwt--read-form ()
+  "Read one form at point, reporting bad source as a `user-error'."
+  (condition-case err
+      (let ((read-eval nil))
+        (ignore read-eval)
+        (read (current-buffer)))
+    (error
+     (user-error "Cannot read a form in %s at %d: %s"
+                 (or buffer-file-name (buffer-name))
+                 (point)
+                 (error-message-string err)))))
+
 (defun ert-gwt--count-definitions (form clauses)
-  "Count `ert-gwt-deftest' forms in FORM whose clauses equal CLAUSES."
+  "Count `ert-gwt-deftest' forms in FORM whose clauses equal CLAUSES.
+Only descend into wrappers that run at load time."
   (cond
    ((not (consp form)) 0)
    ((memq (car form) '(quote function)) 0)
    ((and (eq (car form) 'ert-gwt-deftest)
          (equal (cdr form) clauses))
     1)
-   (t
+   ((memq (car form) ert-gwt--definition-wrappers)
     (let ((count 0))
-      (dolist (part form)
+      (dolist (part (cdr form))
         (setq count (+ count (ert-gwt--count-definitions part clauses))))
-      count))))
+      count))
+   (t 0)))
 
 (defun ert-gwt--source-occurrence (clauses)
   "Return the one-based occurrence of CLAUSES before point.
 Count definitions in the current Emacs Lisp source buffer from the
 beginning through the form currently being expanded.  Return nil when
-the current buffer is not a source file, as during `load'."
+the current buffer is not a source file, as during `load'.  Signal a
+`user-error' if the source before point cannot be read."
   (when (and buffer-file-name
              (derived-mode-p 'emacs-lisp-mode))
     (let ((limit (point))
           (count 0))
       (save-excursion
         (goto-char (point-min))
-        (condition-case nil
-            (while (< (point) limit)
-              (forward-comment (point-max))
-              (when (< (point) limit)
-                (let ((read-eval nil))
-                  (ignore read-eval)
-                  (setq count (+ count
-                                 (ert-gwt--count-definitions
-                                  (read (current-buffer)) clauses))))))
-          (end-of-file nil)
-          (error nil)))
+        (while (< (point) limit)
+          (forward-comment (point-max))
+          (when (< (point) limit)
+            (setq count (+ count
+                           (ert-gwt--count-definitions
+                            (ert-gwt--read-form) clauses))))))
       (when (> count 0) count))))
 
 (defun ert-gwt--scan-definitions (clauses end)
   "Return positions of CLAUSES forms before END.
-Point starts at a form boundary.  Descend into every list except
-quoted data, so definitions inside `progn', `when', `if' and
-`eval-and-compile' are found, and leading whitespace does not matter."
+Point starts at a form boundary.  Descend only into wrappers that run
+at load time, so definitions inside `progn', `when', `if' and
+`eval-and-compile' are found while function bodies are skipped.
+Leading whitespace does not matter."
   (let (positions)
     (while (and (< (point) end)
                 (progn
@@ -239,15 +261,13 @@ quoted data, so definitions inside `progn', `when', `if' and
                   (and (< (point) end)
                        (not (eq (char-after) ?\))))))
       (let* ((start (point))
-             (form (let ((read-eval nil))
-                     (ignore read-eval)
-                     (read (current-buffer)))))
+             (form (ert-gwt--read-form)))
         (when (and (consp form)
                    (eq (car form) 'ert-gwt-deftest)
                    (equal (cdr form) clauses))
           (push start positions))
         (when (and (consp form)
-                   (not (memq (car form) '(quote function))))
+                   (memq (car form) ert-gwt--definition-wrappers))
           (let ((form-end (point)))
             (save-excursion
               (goto-char (1+ start))

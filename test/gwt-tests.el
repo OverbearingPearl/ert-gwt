@@ -424,6 +424,80 @@
       (when (file-exists-p file)
         (delete-file file)))))
 
+(ert-deftest gwt-tests--find-definition-skips-function-bodies ()
+  "A definition inside a function body is not a top-level test."
+  (let* ((before (mapcar #'ert-test-name (ert-select-tests t t)))
+         (file (make-temp-file "gwt-nested-" nil ".el"))
+         (hidden '((:given ((hidden 1)))
+                   (:when (ignore hidden))
+                   (:then (should t))))
+         names)
+    (unwind-protect
+        (progn
+          (with-temp-file file
+            (insert ";;; gwt-nested.el --- test -*- lexical-binding: t; -*-\n")
+            (insert "(require 'ert-gwt)\n\n")
+            (insert "(defun gwt-tests--hidden-definition ()\n")
+            (insert "  (ert-gwt-deftest\n"
+                    "    (:given ((hidden 1)))\n"
+                    "    (:when (ignore hidden))\n"
+                    "    (:then (should t))))\n\n")
+            (insert "(ert-gwt-deftest\n"
+                    "  (:given ((x 1)))\n"
+                    "  (:when (ignore x))\n"
+                    "  (:then (should (= x 1))))\n"))
+          (load file nil t)
+          (setq names (gwt-tests--defined-names before))
+          (should (= (length names) 1))
+          (should-not (ert-gwt--definition-positions file hidden))
+          (let ((loc (find-definition-noselect (car names) 'ert--test)))
+            (should (equal (gwt-tests--line-at loc) 10))))
+      (gwt-tests--delete-tests names)
+      (gwt-tests--kill-file-buffer file)
+      (when (file-exists-p file)
+        (delete-file file)))))
+
+(ert-deftest gwt-tests--source-read-error-is-reported ()
+  "Unreadable source before the form is a user error, not a silent zero."
+  (with-temp-buffer
+    (setq buffer-file-name "/tmp/gwt-broken-source.el")
+    (emacs-lisp-mode)
+    (insert "(")
+    (goto-char (point-max))
+    (should-error (ert-gwt--source-occurrence '((:when t)))
+                  :type 'user-error)))
+
+(ert-deftest gwt-tests--find-definition-read-error-is-reported ()
+  "Unreadable source during the find gives a useful error."
+  (let* ((before (mapcar #'ert-test-name (ert-select-tests t t)))
+         (file (make-temp-file "gwt-broken-" nil ".el"))
+         names name)
+    (unwind-protect
+        (progn
+          (with-temp-file file
+            (insert ";;; gwt-broken.el --- test -*- lexical-binding: t; -*-\n")
+            (insert "(require 'ert-gwt)\n\n")
+            (insert "(ert-gwt-deftest\n"
+                    "  (:given ((x 1)))\n"
+                    "  (:when (ignore x))\n"
+                    "  (:then (should (= x 1))))\n"))
+          (load file nil t)
+          (setq names (gwt-tests--defined-names before))
+          (setq name (car names))
+          (let ((source (with-temp-buffer
+                          (insert-file-contents file)
+                          (buffer-string))))
+            (with-temp-file file
+              (insert source)
+              (goto-char (point-max))
+              (insert "\n(")))
+          (should-error (find-definition-noselect name 'ert--test)
+                        :type 'user-error))
+      (gwt-tests--delete-tests names)
+      (gwt-tests--kill-file-buffer file)
+      (when (file-exists-p file)
+        (delete-file file)))))
+
 (ert-deftest gwt-tests--find-definition-stale-signals ()
   "A changed clause gives a useful error instead of a silent miss."
   (let* ((before (mapcar #'ert-test-name (ert-select-tests t t)))
