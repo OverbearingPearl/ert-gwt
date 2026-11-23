@@ -417,6 +417,24 @@
       (delete-directory dir-a t)
       (delete-directory dir-b t))))
 
+(ert-deftest gwt-tests--name-context-follows-project-relative-path ()
+  "The context ignores the checkout directory but keeps the project name."
+  (let* ((base (make-temp-file "gwt-context-" t))
+         (proj-a (expand-file-name "a/proj" base))
+         (proj-b (expand-file-name "b/proj" base))
+         (file-a (expand-file-name "test/sample.el" proj-a))
+         (file-b (expand-file-name "test/sample.el" proj-b)))
+    (unwind-protect
+        (progn
+          (dolist (proj (list proj-a proj-b))
+            (make-directory (expand-file-name ".git" proj) t)
+            (make-directory (expand-file-name "test" proj) t))
+          (should (equal (ert-gwt-name-context file-a)
+                         "proj/test/sample.el"))
+          (should (equal (ert-gwt-name-context file-a)
+                         (ert-gwt-name-context file-b))))
+      (delete-directory base t))))
+
 (ert-deftest gwt-tests--cleanup ()
   "`ert-gwt--cleanup' kills new buffers, deletes tracked files and resets the list."
   (let* ((pre-buffers (buffer-list))

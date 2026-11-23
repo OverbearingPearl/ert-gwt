@@ -60,9 +60,9 @@ Runs on `after-load-functions' so reloading produces the same names."
 
 (defun ert-gwt--source-file (&optional file)
   "Return the source file for FILE, or for the current load context.
-FILE defaults to `load-file-name', then the variable
-`buffer-file-name'.  A byte-compiled .elc file maps to its .el source
-when that exists."
+FILE defaults to `load-file-name', `macroexp-file-name', then the
+variable `buffer-file-name'.  A byte-compiled .elc file maps to its
+.el source when that exists."
   (let ((file (or file
                  load-file-name
                  (and (fboundp 'macroexp-file-name)
@@ -74,6 +74,38 @@ when that exists."
                (file-exists-p (concat (file-name-sans-extension file) ".el")))
           (concat (file-name-sans-extension file) ".el")
         file))))
+
+(defun ert-gwt--project-root (file)
+  "Return the project root directory containing FILE, or nil.
+A project root is the nearest directory with a .git, .hg, Cask or
+Eask marker."
+  (let ((dir (file-name-directory (file-truename file))))
+    (or (locate-dominating-file dir ".git")
+        (locate-dominating-file dir ".hg")
+        (locate-dominating-file dir "Cask")
+        (locate-dominating-file dir "Eask"))))
+
+(defun ert-gwt-name-context (file)
+  "Return the hash context for test definitions in FILE.
+The context is FILE's path relative to its project root, prefixed
+with the root's directory name.  This keeps names stable when the
+project is checked out at a different absolute path, while still
+distinguishing same-named files in different projects.  When no
+project root is found, use the parent directory name and FILE's
+base name."
+  (if (null file)
+      ""
+    (let* ((true (file-truename file))
+           (root (ert-gwt--project-root true)))
+      (if root
+          (let ((root (file-truename root)))
+            (concat (file-name-nondirectory (directory-file-name root))
+                    "/"
+                    (file-relative-name true root)))
+        (concat (file-name-nondirectory
+                 (directory-file-name (file-name-directory true)))
+                "/"
+                (file-name-nondirectory true))))))
 
 (defun ert-gwt--print-form (form)
   "Return a stable printed representation of FORM.
@@ -225,6 +257,15 @@ Each :given is recorded as (BINDINGS . SETUP-FORMS)."
   :prefix "ert-gwt-"
   :group 'ert)
 
+(defcustom ert-gwt-name-context-function #'ert-gwt-name-context
+  "Function used to derive a test name's file context.
+It is called with the defining file's truename, or nil when no file
+is known, and should return a string.  The default uses a path
+relative to the project root so test names survive a change of
+checkout directory."
+  :type 'function
+  :group 'ert-gwt)
+
 (defun ert-gwt--expand-givens (GIVENS WHEN-FORM THENS CLEANUPS)
   "Expand GIVENS, WHEN-FORM, THENS and CLEANUPS into a test body.
 All bindings go into one `cl-letf*', so each binding sees the earlier
@@ -356,7 +397,8 @@ position among identical clause blocks in the defining file."
                                 (make-hash-table :test 'equal)
                                 ert-gwt--seen))))
     (let ((result (ert-gwt--compute-name
-                   prefix clauses subtable (or file ""))))
+                   prefix clauses subtable
+                   (funcall ert-gwt-name-context-function file))))
       (cons (intern (car result)) (cdr result)))))
 
 (defun ert-gwt--name (clauses)
